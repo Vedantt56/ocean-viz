@@ -4,9 +4,14 @@ import Scene from './components/Scene.jsx';
 import Legend from './components/Legend.jsx';
 import ProfilePanel from './components/ProfilePanel.jsx';
 import TimeControl from './components/TimeControl.jsx';
+import GlobeView from './components/GlobeView.jsx';
+import { Globe } from 'lucide-react';
 import { getField, getDepths, getFloats, getFloatProfile, getTimesteps } from './api.js';
 
 export default function App() {
+  // 1. View Routing State: "globe" or "region"
+  const [view, setView] = useState("globe");
+
   const [activeVariable, setActiveVariable] = useState('temperature');
   const [activeDepth, setActiveDepth] = useState(0);
   const [activeTime, setActiveTime] = useState('2024-06-01');
@@ -25,7 +30,7 @@ export default function App() {
   const [valueRange, setValueRange] = useState({ min: 0, max: 30 });
   const [loading, setLoading] = useState(true);
 
-  // 1. Fetch available timesteps & float markers index on mount
+  // Fetch available timesteps & float markers index on mount
   useEffect(() => {
     getTimesteps()
       .then((steps) => setTimesteps(steps))
@@ -36,7 +41,7 @@ export default function App() {
       .catch((err) => console.error('[App] Error fetching floats index:', err));
   }, []);
 
-  // 2. Fetch all 5 depth level slices when variable or time changes
+  // Fetch all 5 depth level slices when variable or time changes
   useEffect(() => {
     let isSubscribed = true;
     setLoading(true);
@@ -94,6 +99,12 @@ export default function App() {
   const effectiveMin = minOverride !== null ? minOverride : valueRange.min;
   const effectiveMax = maxOverride !== null ? maxOverride : valueRange.max;
 
+  // 2. Render Globe View if view === "globe"
+  if (view === "globe") {
+    return <GlobeView onSelectRegion={() => setView("region")} />;
+  }
+
+  // 3. Render Region View if view === "region"
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-ocean-dark text-slate-100">
       {/* Left Sidebar Controls */}
@@ -117,6 +128,16 @@ export default function App() {
 
       {/* Main 3D Viewport Scene */}
       <main className="relative flex-1 h-full bg-slate-950">
+        {/* Back to Globe Button (Visible only in "region" view) */}
+        <button
+          onClick={() => setView("globe")}
+          className="absolute top-4 left-4 z-30 px-3 py-1.5 rounded-lg bg-ocean-panel/90 backdrop-blur-md border border-ocean-border hover:border-cyan-400 text-slate-300 hover:text-white text-xs font-medium flex items-center gap-2 shadow-lg transition-all"
+          title="Return to Globe View"
+        >
+          <Globe className="w-4 h-4 text-cyan-400" />
+          <span>Globe View</span>
+        </button>
+
         {loading && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-ocean-dark/60 backdrop-blur-sm">
             <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-ocean-panel border border-ocean-border shadow-xl">
