@@ -32,6 +32,13 @@ def test_endpoints():
     print(f"[OK] GET /timesteps -> {t_list}")
     assert "2024-06-01" in t_list
     
+    # 3b. Test /depths
+    res = client.get("/depths")
+    assert res.status_code == 200
+    depths_list = res.json()
+    print(f"[OK] GET /depths -> {depths_list}")
+    assert 0 in depths_list and 100 in depths_list
+    
     # 4. Test /field
     res = client.get("/field?variable=temperature&depth=0&time=2024-06-01")
     assert res.status_code == 200
@@ -53,14 +60,20 @@ def test_endpoints():
     assert len(floats_list) > 0
     first_float_id = floats_list[0]["float_id"]
     
-    # 6. Test /floats/{id}/profile
+    # 6. Test /floats/{id}/profile (exact case)
     res = client.get(f"/floats/{first_float_id}/profile")
     assert res.status_code == 200
     profile_data = res.json()
     print(f"[OK] GET /floats/{first_float_id}/profile -> float_id={profile_data.get('float_id')}, profiles={len(profile_data.get('profiles'))}")
     assert profile_data.get("float_id") == first_float_id
+
+    # 7. Test /floats/{id}/profile (lowercase variant resolution)
+    res_lower = client.get(f"/floats/{first_float_id.lower()}/profile")
+    assert res_lower.status_code == 200
+    print(f"[OK] GET /floats/{first_float_id.lower()}/profile -> resolved case-insensitively")
     
     print("\nALL BACKEND API CONTRACT TESTS PASSED PERFECTLY!")
+
 
 if __name__ == "__main__":
     test_endpoints()

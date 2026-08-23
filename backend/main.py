@@ -106,6 +106,24 @@ def get_field(
             detail=f"Error reading slice file: {str(e)}"
         )
 
+@app.get("/depths", response_model=List[int])
+def get_depths():
+    """
+    HTTP Contract: GET /depths
+    Returns sorted list of integer depth levels found in data/slices/
+    """
+    if not os.path.exists(SLICES_DIR):
+        return [0, 50, 100, 200, 500]
+    
+    depth_set = set()
+    for var in os.listdir(SLICES_DIR):
+        var_path = os.path.join(SLICES_DIR, var)
+        if os.path.isdir(var_path):
+            for d in os.listdir(var_path):
+                if d.isdigit():
+                    depth_set.add(int(d))
+    return sorted(list(depth_set)) if depth_set else [0, 50, 100, 200, 500]
+
 @app.get("/floats")
 def get_floats(region: Optional[str] = None):
     """
@@ -134,8 +152,17 @@ def get_float_profile(float_id: str):
     """
     HTTP Contract: GET /floats/{id}/profile
     Returns full profile data for specific float_id from data/floats/{float_id}.json
+    Handles case-insensitive float ID matches.
     """
     float_file = os.path.join(FLOATS_DIR, f"{float_id}.json")
+    
+    # Case-insensitive resolution if exact file match fails
+    if not os.path.exists(float_file) and os.path.exists(FLOATS_DIR):
+        for fname in os.listdir(FLOATS_DIR):
+            if fname.lower() == f"{float_id.lower()}.json":
+                float_file = os.path.join(FLOATS_DIR, fname)
+                break
+
     if not os.path.exists(float_file):
         raise HTTPException(
             status_code=404,
@@ -151,6 +178,7 @@ def get_float_profile(float_id: str):
             status_code=500,
             detail=f"Error reading float profile for {float_id}: {str(e)}"
         )
+
 
 if __name__ == "__main__":
     import uvicorn

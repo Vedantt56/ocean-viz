@@ -13,7 +13,7 @@ import {
 } from "./fixtures.js";
 
 // Global Flag: Toggle between local fixture data and real backend HTTP endpoints
-export const USE_FIXTURES = true;
+export const USE_FIXTURES = false;
 
 const API_BASE_URL = "http://localhost:8000";
 
@@ -51,13 +51,17 @@ export async function getTimesteps() {
 
 /**
  * Fetch available depth levels
+ * Endpoint: GET /depths
  */
 export async function getDepths() {
   if (USE_FIXTURES) {
     return mockDelay(FIXTURE_DEPTHS);
   }
-  return mockDelay(FIXTURE_DEPTHS);
+  const res = await fetch(`${API_BASE_URL}/depths`);
+  if (!res.ok) throw new Error(`Failed to fetch depths: ${res.statusText}`);
+  return res.json();
 }
+
 
 /**
  * Fetch a specific 2D field grid by variable, depth, and time

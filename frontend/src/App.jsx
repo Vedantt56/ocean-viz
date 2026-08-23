@@ -99,6 +99,9 @@ export default function App() {
   const effectiveMin = minOverride !== null ? minOverride : valueRange.min;
   const effectiveMax = maxOverride !== null ? maxOverride : valueRange.max;
 
+  // View mode state: "slices" | "volume" | "isosurface"
+  const [renderMode, setRenderMode] = useState("slices");
+
   // 2. Render Globe View if view === "globe"
   if (view === "globe") {
     return <GlobeView onSelectRegion={() => setView("region")} />;
@@ -131,7 +134,7 @@ export default function App() {
         {/* Back to Globe Button (Visible only in "region" view) */}
         <button
           onClick={() => setView("globe")}
-          className="absolute top-4 left-4 z-30 px-3 py-1.5 rounded-lg bg-ocean-panel/90 backdrop-blur-md border border-ocean-border hover:border-cyan-400 text-slate-300 hover:text-white text-xs font-medium flex items-center gap-2 shadow-lg transition-all"
+          className="absolute top-4 left-4 z-30 px-3.5 py-2 rounded-xl bg-ocean-panel/90 backdrop-blur-md border border-ocean-border hover:border-cyan-400 text-slate-300 hover:text-white text-xs font-medium flex items-center gap-2 shadow-xl transition-all hover:scale-105"
           title="Return to Globe View"
         >
           <Globe className="w-4 h-4 text-cyan-400" />
@@ -142,7 +145,7 @@ export default function App() {
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-ocean-dark/60 backdrop-blur-sm">
             <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-ocean-panel border border-ocean-border shadow-xl">
               <div className="w-4 h-4 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
-              <span className="text-xs text-slate-300 font-medium">Loading field slice...</span>
+              <span className="text-xs text-slate-300 font-medium">Loading 3D Ocean Volume...</span>
             </div>
           </div>
         )}
@@ -157,7 +160,29 @@ export default function App() {
           scaleMode={scaleMode}
           minOverride={minOverride}
           maxOverride={maxOverride}
+          renderMode={renderMode}
         />
+
+        {/* Bottom Mode Switcher Bar (Slices / Volume / Isosurface) */}
+        <div className="absolute bottom-16 left-6 z-30 flex items-center gap-1.5 p-1 rounded-xl bg-ocean-panel/90 backdrop-blur-xl border border-ocean-border/80 shadow-2xl">
+          {[
+            { id: 'slices', label: 'Slices' },
+            { id: 'volume', label: 'Volume' },
+            { id: 'isosurface', label: 'Isosurface (Beta)' },
+          ].map((mode) => (
+            <button
+              key={mode.id}
+              onClick={() => setRenderMode(mode.id)}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+                renderMode === mode.id
+                  ? 'bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
 
         {/* Time Control Bar (Slider + Play/Pause Auto-Play) */}
         <TimeControl
@@ -186,4 +211,5 @@ export default function App() {
       </main>
     </div>
   );
+
 }
