@@ -1,0 +1,25 @@
+# Large raw data files (downloaded NetCDF/Argo files)
+pipeline/raw/
+
+# Generated dataset slices & float profiles (local execution output)
+data/
+
+# Python cache & virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# Node / Frontend dependencies & builds
+frontend/node_modules/
+frontend/dist/
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
