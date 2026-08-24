@@ -1,7 +1,8 @@
 /**
  * API Service Wrapper for Ocean Data 3D Visualization Platform (SIH PS 26067)
  * 
- * Switching USE_FIXTURES flag to false points the app at the real FastAPI backend.
+ * Points to the real FastAPI backend at http://localhost:8000.
+ * Falls back gracefully to local fixture data if the backend server is offline.
  */
 import {
   FIXTURE_VARIABLES,
@@ -18,9 +19,9 @@ export const USE_FIXTURES = false;
 const API_BASE_URL = "http://localhost:8000";
 
 /**
- * Helper to simulate network latency when in mock mode
+ * Helper to simulate network latency when in mock/fallback mode
  */
-const mockDelay = (data, ms = 100) =>
+const mockDelay = (data, ms = 50) =>
   new Promise((resolve) => setTimeout(() => resolve(data), ms));
 
 /**
@@ -31,9 +32,14 @@ export async function getVariables() {
   if (USE_FIXTURES) {
     return mockDelay(FIXTURE_VARIABLES);
   }
-  const res = await fetch(`${API_BASE_URL}/variables`);
-  if (!res.ok) throw new Error(`Failed to fetch variables: ${res.statusText}`);
-  return res.json();
+  try {
+    const res = await fetch(`${API_BASE_URL}/variables`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("[API] Backend /variables unreachable, using local fixture fallback:", err.message);
+    return mockDelay(FIXTURE_VARIABLES);
+  }
 }
 
 /**
@@ -44,9 +50,14 @@ export async function getTimesteps() {
   if (USE_FIXTURES) {
     return mockDelay(FIXTURE_TIMESTEPS);
   }
-  const res = await fetch(`${API_BASE_URL}/timesteps`);
-  if (!res.ok) throw new Error(`Failed to fetch timesteps: ${res.statusText}`);
-  return res.json();
+  try {
+    const res = await fetch(`${API_BASE_URL}/timesteps`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("[API] Backend /timesteps unreachable, using local fixture fallback:", err.message);
+    return mockDelay(FIXTURE_TIMESTEPS);
+  }
 }
 
 /**
@@ -57,11 +68,15 @@ export async function getDepths() {
   if (USE_FIXTURES) {
     return mockDelay(FIXTURE_DEPTHS);
   }
-  const res = await fetch(`${API_BASE_URL}/depths`);
-  if (!res.ok) throw new Error(`Failed to fetch depths: ${res.statusText}`);
-  return res.json();
+  try {
+    const res = await fetch(`${API_BASE_URL}/depths`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("[API] Backend /depths unreachable, using local fixture fallback:", err.message);
+    return mockDelay(FIXTURE_DEPTHS);
+  }
 }
-
 
 /**
  * Fetch a specific 2D field grid by variable, depth, and time
@@ -69,24 +84,32 @@ export async function getDepths() {
  */
 export async function getField(variable, depth, time) {
   if (USE_FIXTURES) {
-    const key = `${variable}_${depth}_${time}`;
-    const data = FIXTURE_FIELDS[key];
-    if (!data) {
-      // Fallback fallback if specific combination key isn't in fixture dictionary
-      const defaultData = FIXTURE_FIELDS[`${variable}_0_${time}`] || FIXTURE_FIELDS[`temperature_0_2024-06-01`];
-      return mockDelay({ ...defaultData, variable, depth, time });
-    }
-    return mockDelay(data);
+    return getFixtureField(variable, depth, time);
   }
 
-  const url = new URL(`${API_BASE_URL}/field`);
-  url.searchParams.append("variable", variable);
-  url.searchParams.append("depth", depth);
-  url.searchParams.append("time", time);
+  try {
+    const url = new URL(`${API_BASE_URL}/field`);
+    url.searchParams.append("variable", variable);
+    url.searchParams.append("depth", depth);
+    url.searchParams.append("time", time);
 
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch field data (${variable}, depth ${depth}, time ${time}): ${res.statusText}`);
-  return res.json();
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.warn(`[API] Backend /field (${variable}, ${depth}m, ${time}) unreachable, using local fixture fallback:`, err.message);
+    return getFixtureField(variable, depth, time);
+  }
+}
+
+function getFixtureField(variable, depth, time) {
+  const key = `${variable}_${depth}_${time}`;
+  const data = FIXTURE_FIELDS[key];
+  if (!data) {
+    const defaultData = FIXTURE_FIELDS[`${variable}_0_${time}`] || FIXTURE_FIELDS[`temperature_0_2024-06-01`];
+    return mockDelay({ ...defaultData, variable, depth, time });
+  }
+  return mockDelay(data);
 }
 
 /**
@@ -97,9 +120,14 @@ export async function getFloats(region = "indian_ocean") {
   if (USE_FIXTURES) {
     return mockDelay(FIXTURE_FLOATS_INDEX);
   }
-  const res = await fetch(`${API_BASE_URL}/floats?region=${encodeURIComponent(region)}`);
-  if (!res.ok) throw new Error(`Failed to fetch float index: ${res.statusText}`);
-  return res.json();
+  try {
+    const res = await fetch(`${API_BASE_URL}/floats?region=${encodeURIComponent(region)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("[API] Backend /floats unreachable, using local fixture fallback:", err.message);
+    return mockDelay(FIXTURE_FLOATS_INDEX);
+  }
 }
 
 /**
@@ -108,10 +136,19 @@ export async function getFloats(region = "indian_ocean") {
  */
 export async function getFloatProfile(floatId) {
   if (USE_FIXTURES) {
-    const profile = FIXTURE_FLOAT_PROFILES[floatId] || FIXTURE_FLOAT_PROFILES["argo_2901234"];
-    return mockDelay(profile);
+    return getFixtureFloatProfile(floatId);
   }
-  const res = await fetch(`${API_BASE_URL}/floats/${encodeURIComponent(floatId)}/profile`);
-  if (!res.ok) throw new Error(`Failed to fetch profile for float ${floatId}: ${res.statusText}`);
-  return res.json();
+  try {
+    const res = await fetch(`${API_BASE_URL}/floats/${encodeURIComponent(floatId)}/profile`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.warn(`[API] Backend /floats/${floatId}/profile unreachable, using local fixture fallback:`, err.message);
+    return getFixtureFloatProfile(floatId);
+  }
+}
+
+function getFixtureFloatProfile(floatId) {
+  const profile = FIXTURE_FLOAT_PROFILES[floatId] || FIXTURE_FLOAT_PROFILES["argo_2901234"] || FIXTURE_FLOAT_PROFILES["ARGO_2901234"];
+  return mockDelay(profile);
 }
