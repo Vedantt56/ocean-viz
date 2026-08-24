@@ -2,28 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  background-color: #0B1325;
-  color: #E2E8F0;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+@layer base {
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #070f21;
+    color: #f1f5f9;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
 }
 
-/* Custom scrollbars for side panels */
+/* Scientific Glassmorphism Panels */
+.glass-panel {
+  background: rgba(16, 29, 54, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(27, 46, 80, 0.8);
+}
+
+.glass-panel-subtle {
+  background: rgba(11, 22, 44, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(27, 46, 80, 0.6);
+}
+
+/* Custom Sleek Scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #121D33;
+  background: #070f21;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1E2D4A;
-  border-radius: 3px;
+  background: #1b2e50;
+  border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #00D2FF;
+  background: #00d2ff;
 }
+
+/* Custom Number Input Styling */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
+

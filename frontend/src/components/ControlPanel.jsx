@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import ColorbarEditor from './ColorbarEditor.jsx';
-import { X, Info } from 'lucide-react';
+import { X, Info, Sliders, Layers, Eye, ChevronDown, ChevronUp } from 'lucide-react';
 
 const VARIABLES = [
   { id: 'temperature', name: 'Temperature', unit: '°C', color: 'from-amber-500 to-rose-500' },
@@ -9,13 +9,12 @@ const VARIABLES = [
   { id: 'chlorophyll', name: 'Chlorophyll', unit: 'mg/m³', color: 'from-lime-400 to-emerald-600' },
 ];
 
-const DEPTH_LEVELS = [0, 50, 100, 200, 500];
-
 export default function ControlPanel({
   activeVariable,
   onSelectVariable,
   activeDepth,
   onSelectDepth,
+  availableDepths = [],
   palette,
   onSelectPalette,
   scaleMode,
@@ -27,8 +26,16 @@ export default function ControlPanel({
   onResetRange,
   autoMin,
   autoMax,
+  verticalExaggeration = 1.0,
+  onChangeVerticalExaggeration,
+  sliceOpacity = 0.92,
+  onChangeSliceOpacity,
 }) {
   const [showNotice, setShowNotice] = useState(true);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+
+  const depthLevels = availableDepths && availableDepths.length > 0 ? availableDepths : [activeDepth || 0];
+
 
   const handleVariableToggle = (varId) => {
     console.log(`[ControlPanel] Selected variable: ${varId}`);
@@ -37,34 +44,34 @@ export default function ControlPanel({
 
   const handleSliderChange = (e) => {
     const depthIdx = parseInt(e.target.value, 10);
-    const selectedDepth = DEPTH_LEVELS[depthIdx];
+    const selectedDepth = depthLevels[depthIdx];
     if (onSelectDepth) onSelectDepth(selectedDepth);
   };
 
-  const currentDepthIdx = DEPTH_LEVELS.indexOf(activeDepth) !== -1
-    ? DEPTH_LEVELS.indexOf(activeDepth)
+  const currentDepthIdx = depthLevels.indexOf(activeDepth) !== -1
+    ? depthLevels.indexOf(activeDepth)
     : 0;
 
   return (
-    <aside className="w-72 bg-ocean-panel/90 backdrop-blur-md border-r border-ocean-border p-4 flex flex-col gap-4.5 z-10 shadow-2xl overflow-y-auto">
-      {/* Top Header Bar */}
-      <div className="pb-3 border-b border-ocean-border/60">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
-          <h1 className="text-xs font-bold tracking-widest text-white uppercase font-mono">
-            OCEAN 3D PLATFORM
+    <aside className="w-80 glass-panel border-r border-ocean-border p-4.5 flex flex-col gap-4 z-20 shadow-glass overflow-y-auto font-sans">
+      {/* Header Bar */}
+      <div className="pb-3.5 border-b border-ocean-border/60">
+        <div className="flex items-center gap-2mb-1">
+          <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-cyan-glow" />
+          <h1 className="text-xs font-bold tracking-widest text-white uppercase font-mono pl-1">
+            OCEAN 3D WORKSPACE
           </h1>
         </div>
-        <p className="text-[10px] text-slate-400 font-mono tracking-tight">
-          SIH PS 26067 • MoES / INCOIS
+        <p className="text-[10px] text-slate-400 font-mono tracking-tight mt-0.5">
+          MoES / INCOIS Hydrodynamic Domain
         </p>
       </div>
 
-      {/* Section 1: OCEAN MODEL FIELD */}
+      {/* Section 1: OCEAN VARIABLE FIELD */}
       <div className="pb-3 border-b border-ocean-border/40">
-        <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 font-mono flex items-center justify-between">
-          <span>OCEAN MODEL FIELD</span>
-          <span className="w-1.5 h-1.5 rounded-full bg-cyan-500/60" />
+        <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 font-mono flex items-center justify-between">
+          <span>FIELD VARIABLE</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/80" />
         </h2>
         <div className="flex flex-col gap-1.5">
           {VARIABLES.map((item) => {
@@ -73,21 +80,21 @@ export default function ControlPanel({
               <button
                 key={item.id}
                 onClick={() => handleVariableToggle(item.id)}
-                className={`w-full text-left px-3 py-2 rounded-lg border transition-all duration-200 flex items-center justify-between group ${
+                className={`w-full text-left px-3.5 py-2.5 rounded-xl border transition-all duration-200 flex items-center justify-between group ${
                   isActive
-                    ? 'bg-ocean-border/80 border-cyan-400 text-white shadow-lg shadow-cyan-950/40'
-                    : 'bg-ocean-dark/40 border-ocean-border/60 text-slate-300 hover:border-slate-500 hover:text-white'
+                    ? 'bg-cyan-500/15 border-cyan-400/80 text-white shadow-md shadow-cyan-950/40'
+                    : 'bg-ocean-deep/40 border-ocean-border/60 text-slate-300 hover:border-slate-600 hover:text-white'
                 }`}
               >
                 <div className="flex items-center gap-2.5">
                   <span
                     className={`w-2.5 h-2.5 rounded-full bg-gradient-to-r ${item.color} ${
-                      isActive ? 'ring-2 ring-cyan-400/50 scale-110' : 'opacity-70'
+                      isActive ? 'ring-2 ring-cyan-400/60 scale-110' : 'opacity-70'
                     }`}
-                  ></span>
-                  <span className="text-xs font-medium">{item.name}</span>
+                  />
+                  <span className="text-xs font-medium tracking-wide">{item.name}</span>
                 </div>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
+                <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800/80 text-cyan-300 font-mono border border-slate-700/60">
                   {item.unit}
                 </span>
               </button>
@@ -96,47 +103,55 @@ export default function ControlPanel({
         </div>
       </div>
 
-      {/* Section 2: DEPTH SLICE */}
+      {/* Section 2: DEPTH SLICE (Driven by BackendDepths) */}
       <div className="pb-3 border-b border-ocean-border/40">
-        <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 font-mono flex items-center justify-between">
-          <span>DEPTH SLICE</span>
-          <span className="text-xs font-mono text-cyan-400 font-bold bg-cyan-950/60 border border-cyan-800/50 px-2 py-0.5 rounded">
+        <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 font-mono flex items-center justify-between">
+          <span>DEPTH LEVEL</span>
+          <span className="text-xs font-mono text-cyan-300 font-bold bg-cyan-950/70 border border-cyan-800/60 px-2 py-0.5 rounded-md">
             {activeDepth}m
           </span>
         </h2>
 
-        <div className="bg-ocean-dark/50 border border-ocean-border/60 rounded-xl p-3 flex flex-col gap-2">
+        <div className="bg-ocean-deep/60 border border-ocean-border/60 rounded-xl p-3 flex flex-col gap-2.5">
           <input
             type="range"
             min="0"
-            max={DEPTH_LEVELS.length - 1}
+            max={depthLevels.length - 1}
             step="1"
             value={currentDepthIdx}
             onChange={handleSliderChange}
             className="w-full accent-cyan-400 bg-slate-800 h-2 rounded-lg cursor-pointer"
           />
 
-          <div className="flex justify-between text-[10px] font-mono text-slate-400 px-0.5">
-            {DEPTH_LEVELS.map((d) => (
-              <span
-                key={d}
-                onClick={() => onSelectDepth && onSelectDepth(d)}
-                className={`cursor-pointer hover:text-cyan-300 transition-colors ${
-                  d === activeDepth ? 'text-cyan-400 font-bold' : ''
-                }`}
-              >
-                {d}m
-              </span>
-            ))}
+          <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 px-1 pt-1">
+            {depthLevels.length <= 6 ? (
+              depthLevels.map((d) => (
+                <span
+                  key={d}
+                  onClick={() => onSelectDepth && onSelectDepth(d)}
+                  className={`cursor-pointer hover:text-cyan-300 transition-colors ${
+                    d === activeDepth ? 'text-cyan-400 font-bold scale-105' : 'text-slate-400'
+                  }`}
+                >
+                  {d}m
+                </span>
+              ))
+            ) : (
+              <>
+                <span className="text-cyan-400 font-bold">{depthLevels[0]}m</span>
+                <span className="text-slate-300 font-mono">Active: {activeDepth}m</span>
+                <span className="text-slate-400">{depthLevels[depthLevels.length - 1]}m</span>
+              </>
+            )}
           </div>
         </div>
       </div>
 
       {/* Section 3: COLORBAR EDITOR */}
       <div>
-        <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 font-mono flex items-center justify-between">
-          <span>COLORBAR EDITOR</span>
-          <span className="w-1.5 h-1.5 rounded-full bg-cyan-500/60" />
+        <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 font-mono flex items-center justify-between">
+          <span>COLORBAR & RANGE</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/80" />
         </h2>
         <ColorbarEditor
           palette={palette}
@@ -153,12 +168,64 @@ export default function ControlPanel({
         />
       </div>
 
-      {/* Dismissible Notice Card */}
+      {/* Section 4: ADVANCED 3D RENDER CONTROLS (Collapsible) */}
+      <div className="pt-1">
+        <button
+          onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
+          className="w-full flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono py-1.5 px-1 hover:text-cyan-300 transition-colors"
+        >
+          <span className="flex items-center gap-1.5">
+            <Sliders className="w-3 h-3 text-cyan-400" />
+            Advanced Viewport Options
+          </span>
+          {isAdvancedOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
+
+        {isAdvancedOpen && (
+          <div className="mt-2 bg-ocean-deep/60 border border-ocean-border/60 rounded-xl p-3 flex flex-col gap-3 text-xs font-mono animate-in fade-in duration-200">
+            {/* Vertical Exaggeration Slider */}
+            <div className="flex flex-col gap-1">
+              <div className="flex justify-between text-[10px] text-slate-300">
+                <span>Vertical Scale</span>
+                <span className="text-cyan-400 font-bold">{verticalExaggeration.toFixed(1)}x</span>
+              </div>
+              <input
+                type="range"
+                min="0.5"
+                max="2.5"
+                step="0.1"
+                value={verticalExaggeration}
+                onChange={(e) => onChangeVerticalExaggeration && onChangeVerticalExaggeration(parseFloat(e.target.value))}
+                className="w-full accent-cyan-400 bg-slate-800 h-1.5 rounded-lg cursor-pointer"
+              />
+            </div>
+
+            {/* Slice Opacity Slider */}
+            <div className="flex flex-col gap-1">
+              <div className="flex justify-between text-[10px] text-slate-300">
+                <span>Slice Opacity</span>
+                <span className="text-cyan-400 font-bold">{Math.round(sliceOpacity * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.2"
+                max="1.0"
+                step="0.05"
+                value={sliceOpacity}
+                onChange={(e) => onChangeSliceOpacity && onChangeSliceOpacity(parseFloat(e.target.value))}
+                className="w-full accent-cyan-400 bg-slate-800 h-1.5 rounded-lg cursor-pointer"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Dismissible Scientific Notice Card */}
       {showNotice && (
-        <div className="mt-auto p-2.5 rounded-xl bg-ocean-dark/70 border border-ocean-border/60 text-[10px] text-slate-400 leading-relaxed flex items-start gap-2 relative">
+        <div className="mt-auto p-3 rounded-xl bg-ocean-deep/80 border border-ocean-border/70 text-[10px] text-slate-400 leading-relaxed flex items-start gap-2 relative shadow-inner">
           <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-          <div className="pr-4">
-            <span className="text-amber-400 font-semibold">Notice:</span> Ocean model field data is substituted with public NOAA / Copernicus datasets. Real Argo float observational overlays are live.
+          <div className="pr-4 font-sans">
+            <span className="text-amber-400 font-semibold">Note:</span> Real-time Argo float profile overlays connected via INCOIS/GDAC API feeds.
           </div>
           <button
             onClick={() => setShowNotice(false)}
@@ -172,3 +239,4 @@ export default function ControlPanel({
     </aside>
   );
 }
+

@@ -4,60 +4,92 @@
  * plus enhanced contrast for Thermal preset (Prompt F16) & optional discrete color stepping.
  */
 
-// Preset 1: High-Contrast Thermal (Navy -> Electric Cyan -> Emerald Green -> Gold -> Crimson)
+// Preset 1: High-Contrast Ocean Thermal (Abyss Navy -> Electric Cyan -> Emerald Green -> Gold -> Fiery Red)
 function evalThermal(t) {
-  let r = 0, g = 0, b = 0;
+  t = Math.max(0, Math.min(1, t));
   if (t < 0.25) {
-    // Cold: Deep Navy Blue (5, 20, 75) -> Electric Cyan (0, 220, 255)
-    const factor = t / 0.25;
-    r = Math.round(5 - factor * 5);
-    g = Math.round(20 + factor * 200);
-    b = Math.round(75 + factor * 180);
-  } else if (t < 0.5) {
-    // Cool: Electric Cyan (0, 220, 255) -> Vivid Emerald Green (0, 230, 118)
-    const factor = (t - 0.25) / 0.25;
-    r = 0;
-    g = Math.round(220 + factor * 10);
-    b = Math.round(255 - factor * 137);
+    const f = t / 0.25;
+    return [
+      Math.round(8 + f * (0 - 8)),
+      Math.round(29 + f * (180 - 29)),
+      Math.round(88 + f * (216 - 88)),
+    ];
+  } else if (t < 0.50) {
+    const f = (t - 0.25) / 0.25;
+    return [
+      Math.round(0 + f * (0 - 0)),
+      Math.round(180 + f * (230 - 180)),
+      Math.round(216 + f * (118 - 216)),
+    ];
   } else if (t < 0.75) {
-    // Temperate: Emerald Green (0, 230, 118) -> Golden Yellow (255, 235, 0)
-    const factor = (t - 0.5) / 0.25;
-    r = Math.round(factor * 255);
-    g = Math.round(230 + factor * 5);
-    b = Math.round(118 - factor * 118);
+    const f = (t - 0.50) / 0.25;
+    return [
+      Math.round(0 + f * (255 - 0)),
+      Math.round(230 + f * (234 - 230)),
+      Math.round(118 + f * (0 - 118)),
+    ];
   } else {
-    // Hot: Golden Yellow (255, 235, 0) -> Intense Crimson Red (225, 0, 20)
-    const factor = (t - 0.75) / 0.25;
-    r = Math.round(255 - factor * 30);
-    g = Math.round(235 - factor * 235);
-    b = Math.round(factor * 20);
+    const f = (t - 0.75) / 0.25;
+    return [
+      Math.round(255 + f * (255 - 255)),
+      Math.round(234 - f * 211),
+      Math.round(0 + f * (68 - 0)),
+    ];
   }
-  return [r, g, b];
 }
 
-// Preset 2: Viridis (Perceptually Uniform: Dark Purple -> Teal -> Green -> Yellow)
+// Preset 2: Viridis (Perceptually Uniform: Deep Purple -> Ocean Blue -> Teal -> Lime -> Solar Yellow)
 function evalViridis(t) {
-  const r = Math.round(255 * Math.max(0, Math.min(1, -0.35 + 1.25 * t + 0.1 * Math.sin(t * Math.PI))));
-  const g = Math.round(255 * Math.max(0, Math.min(1, 0.05 + 0.95 * Math.sin(t * Math.PI * 0.95))));
-  const b = Math.round(255 * Math.max(0, Math.min(1, 0.55 - 0.55 * t + 0.45 * Math.cos(t * Math.PI * 0.5))));
-  return [r, g, b];
+  t = Math.max(0, Math.min(1, t));
+  if (t < 0.25) {
+    const f = t / 0.25;
+    return [
+      Math.round(68 + f * (59 - 68)),
+      Math.round(1 + f * (82 - 1)),
+      Math.round(84 + f * (139 - 84)),
+    ];
+  } else if (t < 0.50) {
+    const f = (t - 0.25) / 0.25;
+    return [
+      Math.round(59 + f * (33 - 59)),
+      Math.round(82 + f * (145 - 82)),
+      Math.round(139 + f * (140 - 139)),
+    ];
+  } else if (t < 0.75) {
+    const f = (t - 0.50) / 0.25;
+    return [
+      Math.round(33 + f * (94 - 33)),
+      Math.round(145 + f * (201 - 145)),
+      Math.round(140 + f * (98 - 140)),
+    ];
+  } else {
+    const f = (t - 0.75) / 0.25;
+    return [
+      Math.round(94 + f * (253 - 94)),
+      Math.round(201 + f * (231 - 201)),
+      Math.round(98 + f * (37 - 98)),
+    ];
+  }
 }
 
-// Preset 3: Coolwarm (Diverging: Deep Blue -> Light Gray -> Deep Red)
+// Preset 3: Coolwarm (Diverging: Deep Cobalt -> Ice White -> Crimson Red)
 function evalCoolwarm(t) {
-  let r = 0, g = 0, b = 0;
-  if (t < 0.5) {
-    const factor = t / 0.5;
-    r = Math.round(59 + factor * 161);
-    g = Math.round(76 + factor * 144);
-    b = Math.round(192 + factor * 28);
+  t = Math.max(0, Math.min(1, t));
+  if (t < 0.50) {
+    const f = t / 0.50;
+    return [
+      Math.round(30 + f * (230 - 30)),
+      Math.round(80 + f * (240 - 80)),
+      Math.round(220 + f * (255 - 220)),
+    ];
   } else {
-    const factor = (t - 0.5) / 0.5;
-    r = Math.round(220 + factor * 20);
-    g = Math.round(220 - factor * 170);
-    b = Math.round(220 - factor * 170);
+    const f = (t - 0.50) / 0.50;
+    return [
+      Math.round(230 + f * (235 - 230)),
+      Math.round(240 - f * 200),
+      Math.round(255 - f * 215),
+    ];
   }
-  return [r, g, b];
 }
 
 /**

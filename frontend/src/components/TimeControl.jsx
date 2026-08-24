@@ -14,7 +14,7 @@ export default function TimeControl({
     ? timesteps.indexOf(activeTime)
     : 0;
 
-  // Auto-play interval timer (auto-advance every 1.5 seconds)
+  // Auto-play interval timer (advance every 1.5 seconds)
   useEffect(() => {
     if (isPlaying && timesteps.length > 0) {
       timerRef.current = setInterval(() => {
@@ -31,7 +31,6 @@ export default function TimeControl({
   }, [isPlaying, currentIndex, timesteps, onSelectTime]);
 
   const handleSliderChange = (e) => {
-    // Manual scrub immediately stops auto-play as required by spec!
     if (isPlaying) {
       onTogglePlay(false);
     }
@@ -54,32 +53,32 @@ export default function TimeControl({
   };
 
   return (
-    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-ocean-panel/90 backdrop-blur-xl border border-ocean-border px-5 py-2.5 rounded-2xl shadow-2xl z-20 flex items-center gap-4 w-[460px]">
+    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 glass-panel border border-ocean-border px-5 py-3 rounded-2xl shadow-glass z-30 flex items-center gap-4 w-[480px] font-sans">
       {/* Play / Pause Toggle Button */}
       <button
         onClick={() => onTogglePlay(!isPlaying)}
-        className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+        className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200 ${
           isPlaying
-            ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/30'
-            : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-500/30'
+            ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/25 scale-105'
+            : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md shadow-cyan-500/25 hover:scale-105'
         }`}
-        title={isPlaying ? 'Pause Auto-Play' : 'Play Auto-Advance'}
+        title={isPlaying ? 'Pause Auto-Advance' : 'Play Auto-Advance Sequence'}
       >
-        {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
+        {isPlaying ? <Pause className="w-4.5 h-4.5 fill-current" /> : <Play className="w-4.5 h-4.5 fill-current ml-0.5" />}
       </button>
 
       {/* Prev / Next Buttons */}
       <div className="flex items-center gap-1">
         <button
           onClick={handlePrev}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
           title="Previous Timestep"
         >
           <SkipBack className="w-4 h-4" />
         </button>
         <button
           onClick={handleNext}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
           title="Next Timestep"
         >
           <SkipForward className="w-4 h-4" />
@@ -87,12 +86,12 @@ export default function TimeControl({
       </div>
 
       {/* Timeline Scrub Slider */}
-      <div className="flex-1 flex flex-col gap-1">
+      <div className="flex-1 flex flex-col gap-1.5">
         <div className="flex justify-between items-center text-[11px] font-mono">
-          <span className="flex items-center gap-1 text-slate-400">
-            <Clock className="w-3 h-3 text-cyan-400" /> Time Step
+          <span className="flex items-center gap-1.5 text-slate-400 uppercase tracking-wider">
+            <Clock className="w-3.5 h-3.5 text-cyan-400" /> Timestep
           </span>
-          <span className="text-cyan-300 font-bold bg-cyan-950/60 border border-cyan-800/40 px-1.5 py-0.2 rounded">
+          <span className="text-cyan-300 font-bold bg-cyan-950/70 border border-cyan-800/60 px-2 py-0.5 rounded-md">
             {activeTime}
           </span>
         </div>
@@ -103,9 +102,10 @@ export default function TimeControl({
           max={Math.max(0, timesteps.length - 1)}
           value={currentIndex}
           onChange={handleSliderChange}
-          className="w-full accent-cyan-400 bg-slate-800 h-2 rounded-lg cursor-pointer"
+          className="w-full accent-cyan-400 bg-slate-800 h-1.5 rounded-lg cursor-pointer"
         />
       </div>
     </div>
   );
 }
+

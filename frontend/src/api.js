@@ -62,14 +62,16 @@ export async function getTimesteps() {
 
 /**
  * Fetch available depth levels
- * Endpoint: GET /depths
+ * Endpoint: GET /depths?variable=
  */
-export async function getDepths() {
+export async function getDepths(variable = null) {
   if (USE_FIXTURES) {
     return mockDelay(FIXTURE_DEPTHS);
   }
   try {
-    const res = await fetch(`${API_BASE_URL}/depths`);
+    const url = new URL(`${API_BASE_URL}/depths`);
+    if (variable) url.searchParams.append("variable", variable);
+    const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     return await res.json();
   } catch (err) {
@@ -97,7 +99,6 @@ export async function getField(variable, depth, time) {
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     return await res.json();
   } catch (err) {
-    console.warn(`[API] Backend /field (${variable}, ${depth}m, ${time}) unreachable, using local fixture fallback:`, err.message);
     return getFixtureField(variable, depth, time);
   }
 }
@@ -151,4 +152,34 @@ export async function getFloatProfile(floatId) {
 function getFixtureFloatProfile(floatId) {
   const profile = FIXTURE_FLOAT_PROFILES[floatId] || FIXTURE_FLOAT_PROFILES["argo_2901234"] || FIXTURE_FLOAT_PROFILES["ARGO_2901234"];
   return mockDelay(profile);
+}
+
+/**
+ * Fetch GPU dataset manifest (dimensions, coordinates, variables)
+ * Endpoint: GET /gpu/manifest
+ */
+export async function getGpuManifest() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/gpu/manifest`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.error("[API] Error fetching GPU manifest:", err.message);
+    throw err;
+  }
+}
+
+/**
+ * Fetch binary Float32 buffer for GPU dataset (uo.bin, vo.bin, mask.bin, thetao.bin, so.bin)
+ * Endpoint: GET /gpu/{filename}
+ */
+export async function getGpuBuffer(filename) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/gpu/${filename}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    return await res.arrayBuffer();
+  } catch (err) {
+    console.error(`[API] Error fetching GPU binary buffer ${filename}:`, err.message);
+    throw err;
+  }
 }

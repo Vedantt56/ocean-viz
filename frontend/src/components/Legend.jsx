@@ -24,21 +24,24 @@ export default function Legend({ variable = 'temperature', minVal = 0, maxVal = 
   const gradientClass = PALETTE_GRADIENTS[palette] || PALETTE_GRADIENTS.thermal;
 
   return (
-    <div className="absolute bottom-6 right-6 bg-ocean-panel/85 backdrop-blur-md border border-ocean-border/80 px-4 py-3 rounded-xl shadow-2xl z-10 w-72 flex flex-col gap-1.5">
-      <div className="flex justify-between items-center text-xs font-medium text-slate-300">
-        <span className="capitalize font-semibold text-white">{variable} Range</span>
-        <span className="text-cyan-400 font-mono text-[11px] font-bold">{unit}</span>
+    <div className="absolute bottom-6 right-6 glass-panel border border-ocean-border px-4 py-3 rounded-2xl shadow-glass z-20 w-72 flex flex-col gap-2 font-sans">
+      <div className="flex justify-between items-center text-xs font-mono">
+        <span className="capitalize font-bold text-white tracking-wider uppercase">{variable}</span>
+        <span className="text-cyan-300 font-bold bg-cyan-950/70 border border-cyan-800/60 px-1.5 py-0.5 rounded text-[10px]">
+          {unit}
+        </span>
       </div>
 
       {/* Dynamic Colormap Gradient Bar */}
-      <div className={`h-3.5 w-full rounded-md shadow-inner border border-white/10 ${gradientClass}`} />
+      <div className={`h-3 w-full rounded-md shadow-inner border border-white/10 ${gradientClass}`} />
 
       {/* Min / Mid / Max Range Labels */}
-      <div className="flex justify-between text-[11px] font-mono text-slate-400 px-0.5">
-        <span>{formattedMin} {unit}</span>
-        <span>{midVal}</span>
-        <span>{formattedMax} {unit}</span>
+      <div className="flex justify-between text-[10px] font-mono text-slate-400 px-0.5">
+        <span>{formattedMin}</span>
+        <span className="text-slate-500">{midVal}</span>
+        <span>{formattedMax}</span>
       </div>
     </div>
   );
 }
+

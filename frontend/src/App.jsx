@@ -5,24 +5,27 @@ import Legend from './components/Legend.jsx';
 import ProfilePanel from './components/ProfilePanel.jsx';
 import TimeControl from './components/TimeControl.jsx';
 import GlobeView from './components/GlobeView.jsx';
-import { Globe } from 'lucide-react';
+import { Globe, Layers, Eye, RefreshCw } from 'lucide-react';
 import { getField, getDepths, getFloats, getFloatProfile, getTimesteps } from './api.js';
 
 export default function App() {
   // 1. View Routing State: "globe" or "region"
   const [view, setView] = useState("globe");
 
-  const [activeVariable, setActiveVariable] = useState('temperature');
+  const [activeVariable, setActiveVariable] = useState('currents');
   const [activeDepth, setActiveDepth] = useState(0);
-  const [activeTime, setActiveTime] = useState('2024-06-01');
-  const [timesteps, setTimesteps] = useState(['2024-06-01', '2024-06-02', '2024-06-03']);
+  const [availableDepths, setAvailableDepths] = useState([0, 50, 100, 200, 500, 1000, 2000, 3000, 3992]);
+  const [activeTime, setActiveTime] = useState('2026-08-20');
+  const [timesteps, setTimesteps] = useState(['2026-08-20', '2026-08-21', '2026-08-22', '2026-08-23', '2026-08-24']);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  // Colorbar Editor State
+  // Colorbar & Scene Control State
   const [palette, setPalette] = useState('thermal');
   const [scaleMode, setScaleMode] = useState('linear');
   const [minOverride, setMinOverride] = useState(null);
   const [maxOverride, setMaxOverride] = useState(null);
+  const [verticalExaggeration, setVerticalExaggeration] = useState(1.0);
+  const [sliceOpacity, setSliceOpacity] = useState(0.92);
 
   const [slicesData, setSlicesData] = useState([]);
   const [floatsData, setFloatsData] = useState([]);
@@ -30,59 +33,78 @@ export default function App() {
   const [valueRange, setValueRange] = useState({ min: 0, max: 30 });
   const [loading, setLoading] = useState(true);
 
-  // Fetch available timesteps & float markers index on mount
+  // View mode state: "slices" | "volume" | "isosurface"
+  const [renderMode, setRenderMode] = useState("slices");
+
+  const VARIABLE_RANGES = {
+    currents: { min: 0.0, max: 0.85, palette: 'thermal' },
+    temperature: { min: 12.0, max: 31.0, palette: 'thermal' },
+    salinity: { min: 30.0, max: 35.5, palette: 'viridis' },
+    chlorophyll: { min: 0.05, max: 3.50, palette: 'viridis' },
+  };
+
+  // Sync colorbar range and palette per variable
   useEffect(() => {
+    const config = VARIABLE_RANGES[activeVariable] || VARIABLE_RANGES.currents;
+    setValueRange({ min: config.min, max: config.max });
+    setMinOverride(config.min);
+    setMaxOverride(config.max);
+    setPalette(config.palette);
+  }, [activeVariable]);
+
+  // Fetch available depths for activeVariable, timesteps & float markers index on mount / variable change
+  useEffect(() => {
+    getDepths(activeVariable)
+      .then((depths) => {
+        if (Array.isArray(depths) && depths.length > 0) {
+          setAvailableDepths(depths);
+          if (!depths.includes(activeDepth)) {
+            setActiveDepth(depths[0]);
+          }
+        }
+      })
+      .catch((err) => console.error('[App] Error fetching depths metadata:', err));
+
     getTimesteps()
-      .then((steps) => setTimesteps(steps))
+      .then((steps) => {
+        if (Array.isArray(steps) && steps.length > 0) {
+          setTimesteps(steps);
+          if (!steps.includes(activeTime)) {
+            setActiveTime(steps[0]);
+          }
+        }
+      })
       .catch((err) => console.error('[App] Error fetching timesteps:', err));
 
     getFloats()
       .then((floats) => setFloatsData(floats))
       .catch((err) => console.error('[App] Error fetching floats index:', err));
-  }, []);
+  }, [activeVariable]);
 
-  // Fetch all 5 depth level slices when variable or time changes
+  // Fetch depth level slices from backend when variable, availableDepths, or time changes
   useEffect(() => {
+    if (!availableDepths || availableDepths.length === 0) return;
+
     let isSubscribed = true;
     setLoading(true);
 
-    getDepths()
-      .then((depths) => {
-        const fetchPromises = depths.map((d) => getField(activeVariable, d, activeTime));
-        return Promise.all(fetchPromises);
-      })
+    const depthsToFetch = availableDepths;
+    const fetchPromises = depthsToFetch.map((d) => getField(activeVariable, d, activeTime));
+
+    Promise.all(fetchPromises)
       .then((slices) => {
         if (!isSubscribed) return;
         setSlicesData(slices);
-
-        let globalMin = Infinity;
-        let globalMax = -Infinity;
-        slices.forEach((slice) => {
-          if (!slice.values) return;
-          slice.values.forEach((row) => {
-            row.forEach((v) => {
-              if (v !== null && v !== undefined && !isNaN(v)) {
-                if (v < globalMin) globalMin = v;
-                if (v > globalMax) globalMax = v;
-              }
-            });
-          });
-        });
-
-        if (globalMin !== Infinity) {
-          setValueRange({ min: globalMin, max: globalMax });
-        }
         setLoading(false);
       })
       .catch((err) => {
-        console.error('[App] Error fetching stacked slices data:', err);
         if (isSubscribed) setLoading(false);
       });
 
     return () => {
       isSubscribed = false;
     };
-  }, [activeVariable, activeTime]);
+  }, [activeVariable, availableDepths, activeTime]);
 
   const handleFloatSelect = (floatId) => {
     console.log(`[App] Selected float: ${floatId}`);
@@ -99,23 +121,21 @@ export default function App() {
   const effectiveMin = minOverride !== null ? minOverride : valueRange.min;
   const effectiveMax = maxOverride !== null ? maxOverride : valueRange.max;
 
-  // View mode state: "slices" | "volume" | "isosurface"
-  const [renderMode, setRenderMode] = useState("slices");
-
   // 2. Render Globe View if view === "globe"
   if (view === "globe") {
-    return <GlobeView onSelectRegion={() => setView("region")} />;
+    return <GlobeView onSelectRegion={() => setView("region")} floatsCount={floatsData.length} />;
   }
 
   // 3. Render Region View if view === "region"
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-ocean-dark text-slate-100">
+    <div className="flex h-screen w-screen overflow-hidden bg-ocean-deep text-slate-100 font-sans">
       {/* Left Sidebar Controls */}
       <ControlPanel
         activeVariable={activeVariable}
         onSelectVariable={setActiveVariable}
         activeDepth={activeDepth}
         onSelectDepth={setActiveDepth}
+        availableDepths={availableDepths}
         palette={palette}
         onSelectPalette={setPalette}
         scaleMode={scaleMode}
@@ -127,32 +147,39 @@ export default function App() {
         onResetRange={handleResetRange}
         autoMin={typeof valueRange.min === 'number' ? parseFloat(valueRange.min.toFixed(1)) : valueRange.min}
         autoMax={typeof valueRange.max === 'number' ? parseFloat(valueRange.max.toFixed(1)) : valueRange.max}
+        verticalExaggeration={verticalExaggeration}
+        onChangeVerticalExaggeration={setVerticalExaggeration}
+        sliceOpacity={sliceOpacity}
+        onChangeSliceOpacity={setSliceOpacity}
       />
 
       {/* Main 3D Viewport Scene */}
-      <main className="relative flex-1 h-full bg-slate-950">
-        {/* Back to Globe Button (Visible only in "region" view) */}
+      <main className="relative flex-1 h-full bg-ocean-dark overflow-hidden">
+        {/* Back to Globe Button */}
         <button
           onClick={() => setView("globe")}
-          className="absolute top-4 left-4 z-30 px-3.5 py-2 rounded-xl bg-ocean-panel/90 backdrop-blur-md border border-ocean-border hover:border-cyan-400 text-slate-300 hover:text-white text-xs font-medium flex items-center gap-2 shadow-xl transition-all hover:scale-105"
-          title="Return to Globe View"
+          className="absolute top-4 left-4 z-30 px-3.5 py-2 rounded-xl bg-ocean-panel/85 backdrop-blur-xl border border-ocean-border hover:border-cyan-400/80 text-slate-200 hover:text-white text-xs font-mono font-medium flex items-center gap-2 shadow-2xl transition-all duration-200 hover:scale-105 group"
+          title="Return to Global View"
         >
-          <Globe className="w-4 h-4 text-cyan-400" />
-          <span>Globe View</span>
+          <Globe className="w-4 h-4 text-cyan-400 group-hover:rotate-12 transition-transform duration-300" />
+          <span>Global Earth View</span>
         </button>
 
+        {/* Loading Overlay Spinner */}
         {loading && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-ocean-dark/60 backdrop-blur-sm">
-            <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-ocean-panel border border-ocean-border shadow-xl">
-              <div className="w-4 h-4 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
-              <span className="text-xs text-slate-300 font-medium">Loading 3D Ocean Volume...</span>
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-ocean-dark/70 backdrop-blur-md transition-opacity duration-300">
+            <div className="flex items-center gap-3.5 px-5 py-3 rounded-2xl bg-ocean-panel border border-ocean-border shadow-2xl shadow-cyan-950/50">
+              <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />
+              <span className="text-xs text-slate-200 font-mono tracking-wide">Synthesizing 3D Ocean Volume...</span>
             </div>
           </div>
         )}
 
+        {/* Hero Three.js Canvas Workspace */}
         <Scene
           slicesData={slicesData}
           activeDepth={activeDepth}
+          availableDepths={availableDepths}
           activeVariable={activeVariable}
           floatsData={floatsData}
           onFloatSelect={handleFloatSelect}
@@ -161,22 +188,24 @@ export default function App() {
           minOverride={minOverride}
           maxOverride={maxOverride}
           renderMode={renderMode}
+          verticalExaggeration={verticalExaggeration}
+          sliceOpacity={sliceOpacity}
         />
 
-        {/* Bottom Mode Switcher Bar (Slices / Volume / Isosurface) */}
-        <div className="absolute bottom-16 left-6 z-30 flex items-center gap-1.5 p-1 rounded-xl bg-ocean-panel/90 backdrop-blur-xl border border-ocean-border/80 shadow-2xl">
+        {/* Mode Switcher Pill (Slices / Volume / Isosurface) */}
+        <div className="absolute bottom-16 left-6 z-30 flex items-center gap-1 p-1 rounded-xl bg-ocean-panel/90 backdrop-blur-xl border border-ocean-border shadow-2xl">
           {[
-            { id: 'slices', label: 'Slices' },
-            { id: 'volume', label: 'Volume' },
+            { id: 'slices', label: 'Stacked Slices' },
+            { id: 'volume', label: 'Volumetric Stack' },
             { id: 'isosurface', label: 'Isosurface (Beta)' },
           ].map((mode) => (
             <button
               key={mode.id}
               onClick={() => setRenderMode(mode.id)}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all duration-200 ${
                 renderMode === mode.id
-                  ? 'bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  ? 'bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/25'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
               {mode.label}
@@ -184,7 +213,7 @@ export default function App() {
           ))}
         </div>
 
-        {/* Time Control Bar (Slider + Play/Pause Auto-Play) */}
+        {/* Timeline Control Bar */}
         <TimeControl
           timesteps={timesteps}
           activeTime={activeTime}
@@ -193,7 +222,7 @@ export default function App() {
           onTogglePlay={setIsPlaying}
         />
 
-        {/* On-Screen Colormap Legend */}
+        {/* Scientific Colormap Legend */}
         <Legend
           variable={activeVariable}
           minVal={effectiveMin}
@@ -201,7 +230,7 @@ export default function App() {
           palette={palette}
         />
 
-        {/* Sliding Profile Chart Panel */}
+        {/* Argo Profile Readout Panel */}
         {selectedFloatProfile && (
           <ProfilePanel
             profileData={selectedFloatProfile}
@@ -211,5 +240,5 @@ export default function App() {
       </main>
     </div>
   );
-
 }
+

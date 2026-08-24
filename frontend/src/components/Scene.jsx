@@ -1,223 +1,916 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { animate } from 'animejs';
 import { evaluateColormapValue } from '../utils/colormaps.js';
 
-// Increased vertical spacing between depth planes for visual clarity (Prompt F15)
-const DEPTH_Y_MAPPING = {
-  0: 0.0,
-  50: -1.8,
-  100: -3.6,
-  150: -4.5, // Visual filler slice between 100m and 200m
-  200: -5.4,
-  300: -6.3, // Visual filler slice between 200m and 500m
-  400: -7.2, // Visual filler slice between 200m and 500m
-  500: -8.1,
+const FOOTPRINT_X = 15;
+const FOOTPRINT_Z = 11.5;
+const TILE_THICKNESS = 0.28;
+const DEFAULT_LON_RANGE = [75, 90];
+const DEFAULT_LAT_RANGE = [5, 20];
+
+const VARIABLE_UNITS = {
+  temperature: 'deg C',
+  salinity: 'PSU',
+  currents: 'm/s',
+  chlorophyll: 'mg/m3',
 };
 
-// Explicit Vertical Clearance & Crust Placement Constants (Prompt F31 & F33)
-const DEEPEST_SLICE_Y_POS = -8.1;         // Y position of 500m deepest slice
-const MIN_CRUST_CLEARANCE_MARGIN = 2.5;    // Guaranteed 2.5 unit gap between lowest slice & highest crust peak
-const MAX_CRUST_NOISE_AMPLITUDE = 1.8;     // Rich 1.8 unit 3D terrain height variation
-const CRUST_BOX_HEIGHT = 5.0;              // Thickness of solid crust BoxGeometry
-// Calculated Crust Base Position Y: -8.1 - 2.5 - 1.8 - 2.5 = -14.9Y
-const CALCULATED_CRUST_Y_POS = DEEPEST_SLICE_Y_POS - (CRUST_BOX_HEIGHT / 2.0) - MAX_CRUST_NOISE_AMPLITUDE - MIN_CRUST_CLEARANCE_MARGIN;
-
-// Procedural multi-octave noise generator for realistic 3D seafloor bathymetry terrain (Prompt F33)
-function getSeafloorHeight(x, z) {
-  const d = Math.sqrt(x * x + z * z);
-  // Multi-octave 3D terrain noise for dramatic mountain ridges & ocean trenches
-  const n1 = Math.sin(x * 0.5) * Math.cos(z * 0.5) * 0.8;
-  const n2 = Math.cos(d * 0.6) * 0.6;
-  const n3 = Math.sin(x * 1.2 + z * 0.8) * 0.4;
-  const rawHeight = n1 + n2 + n3 + 0.9;
-
-  // STRICT CLAMP to [0 .. MAX_CRUST_NOISE_AMPLITUDE] (max 1.8 height units)
-  return Math.max(0.0, Math.min(MAX_CRUST_NOISE_AMPLITUDE, rawHeight));
+function getDepthYPosition(depth, availableDepths = [], verticalExaggeration = 1) {
+  const depths = availableDepths && availableDepths.length ? availableDepths : [0];
+  const minD = Math.min(...depths);
+  const maxD = Math.max(...depths, 1);
+  const t = maxD > minD ? (depth - minD) / (maxD - minD) : 0;
+  return -Math.pow(Math.max(0, Math.min(1, t)), 0.72) * 8.8 * verticalExaggeration;
 }
 
+function getSceneMetrics(availableDepths, verticalExaggeration) {
+  const depths = availableDepths && availableDepths.length ? availableDepths : [0];
+  const deepest = Math.min(...depths.map((d) => getDepthYPosition(d, depths, verticalExaggeration)), -8.8);
+  return {
+    surfaceY: 0,
+    deepestSliceY: deepest,
+    waterCenterY: deepest / 2,
+    waterHeight: Math.abs(deepest) + 0.5,
+    seafloorY: deepest - 1.1,
+  };
+}
 
+function disposeObject(obj) {
+  obj.traverse((child) => {
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) {
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach((material) => {
+        Object.values(material).forEach((value) => {
+          if (value && value.isTexture) value.dispose();
+        });
+        material.dispose();
+      });
+    }
+  });
+}
 
-// Generate solid 3D geological crust block geometry (Box with displaced top surface - Prompt F29)
-function createSolidCrustGeometry() {
-  // Box geometry: 16 wide (X), 5 deep (Y), 16 long (Z), with 64x64 top grid
-  const geo = new THREE.BoxGeometry(16, CRUST_BOX_HEIGHT, 16, 64, 1, 64);
-  const pos = geo.attributes.position;
+function clearGroup(group) {
+  while (group.children.length) {
+    const child = group.children[0];
+    group.remove(child);
+    disposeObject(child);
+  }
+}
 
-  for (let i = 0; i < pos.count; i++) {
-    const vx = pos.getX(i);
-    const vy = pos.getY(i);
-    const vz = pos.getZ(i);
+function collectFieldRange(slicesData) {
+  let min = Infinity;
+  let max = -Infinity;
+  slicesData.forEach((slice) => {
+    slice.values?.forEach((row) => {
+      row.forEach((value) => {
+        if (Number.isFinite(value)) {
+          min = Math.min(min, value);
+          max = Math.max(max, value);
+        }
+      });
+    });
+  });
 
-    // Displace top face vertices (vy > 0) to form organic 3D terrain peaks & valleys
-    if (vy > 0.1) {
-      const terrainHeight = getSeafloorHeight(vx, vz);
-      pos.setY(i, vy + terrainHeight);
+  return min === Infinity ? { min: 0, max: 1 } : { min, max };
+}
+
+function getDomainBounds(slicesData) {
+  const sliceWithCoords = slicesData.find((slice) => slice.lat?.length && slice.lon?.length);
+  if (!sliceWithCoords) {
+    return {
+      minLat: DEFAULT_LAT_RANGE[0],
+      maxLat: DEFAULT_LAT_RANGE[1],
+      minLon: DEFAULT_LON_RANGE[0],
+      maxLon: DEFAULT_LON_RANGE[1],
+    };
+  }
+
+  return {
+    minLat: Math.min(...sliceWithCoords.lat),
+    maxLat: Math.max(...sliceWithCoords.lat),
+    minLon: Math.min(...sliceWithCoords.lon),
+    maxLon: Math.max(...sliceWithCoords.lon),
+  };
+}
+
+function projectLonLat(lon, lat, bounds) {
+  const lonT = bounds.maxLon > bounds.minLon ? (lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) : 0.5;
+  const latT = bounds.maxLat > bounds.minLat ? (lat - bounds.minLat) / (bounds.maxLat - bounds.minLat) : 0.5;
+  return {
+    x: (lonT - 0.5) * FOOTPRINT_X,
+    z: -(latT - 0.5) * FOOTPRINT_Z,
+  };
+}
+
+function sampleGrid(values, u, v) {
+  const rows = values?.length ?? 0;
+  const cols = values?.[0]?.length ?? 0;
+  if (!rows || !cols) return null;
+
+  const x = Math.max(0, Math.min(cols - 1, u * (cols - 1)));
+  const y = Math.max(0, Math.min(rows - 1, (1 - v) * (rows - 1)));
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = Math.min(cols - 1, x0 + 1);
+  const y1 = Math.min(rows - 1, y0 + 1);
+  const tx = x - x0;
+  const ty = y - y0;
+
+  const v00 = values[y0][x0];
+  const v10 = values[y0][x1];
+  const v01 = values[y1][x0];
+  const v11 = values[y1][x1];
+  const valid = [v00, v10, v01, v11].filter(Number.isFinite);
+  if (!valid.length) return null;
+
+  const fallback = valid.reduce((sum, value) => sum + value, 0) / valid.length;
+  const a = Number.isFinite(v00) ? v00 : fallback;
+  const b = Number.isFinite(v10) ? v10 : fallback;
+  const c = Number.isFinite(v01) ? v01 : fallback;
+  const d = Number.isFinite(v11) ? v11 : fallback;
+  return a * (1 - tx) * (1 - ty) + b * tx * (1 - ty) + c * (1 - tx) * ty + d * tx * ty;
+}
+
+function createRealTileGroup(slice, props, effectiveRange) {
+  const {
+    activeDepth,
+    availableDepths,
+    palette,
+    scaleMode,
+    renderMode,
+    verticalExaggeration,
+    sliceOpacity,
+  } = props;
+
+  const segmentsX = 120;
+  const segmentsZ = 92;
+  const vertexCount = (segmentsX + 1) * (segmentsZ + 1);
+  const positions = new Float32Array(vertexCount * 3);
+  const colors = new Float32Array(vertexCount * 3);
+  const alphas = new Float32Array(vertexCount);
+  const uvs = new Float32Array(vertexCount * 2);
+  const indices = [];
+
+  const initialDepthY = getDepthYPosition(slice.depth, availableDepths, verticalExaggeration);
+  const sortedDepths = [...availableDepths].sort((a, b) => a - b);
+  const maxDepth = Math.max(...sortedDepths, 1);
+  const depthT = Math.max(0, Math.min(1, slice.depth / maxDepth));
+  const isSelected = slice.depth === activeDepth;
+  const activeIndex = Math.max(0, sortedDepths.indexOf(activeDepth));
+  const sliceIndex = Math.max(0, sortedDepths.indexOf(slice.depth));
+  const indexDistance = Math.abs(sliceIndex - activeIndex);
+  const range = effectiveRange.max - effectiveRange.min || 1;
+  const baseOpacity = sliceOpacity ?? 0.9;
+  const depthStrengths = [0.98, 0.68, 0.48, 0.36, 0.26];
+  const focus = depthStrengths[Math.min(indexDistance, depthStrengths.length - 1)];
+  const layerOpacity = renderMode === 'volume'
+    ? baseOpacity * Math.min(0.78, focus * 0.82)
+    : baseOpacity * focus;
+
+  let ptr = 0;
+  for (let iz = 0; iz <= segmentsZ; iz += 1) {
+    const v = iz / segmentsZ;
+    for (let ix = 0; ix <= segmentsX; ix += 1) {
+      const u = ix / segmentsX;
+      const x = (u - 0.5) * FOOTPRINT_X;
+      const z = (v - 0.5) * FOOTPRINT_Z;
+      const value = sampleGrid(slice.values, u, v);
+      const normalized = Number.isFinite(value) ? Math.max(0, Math.min(1, (value - effectiveRange.min) / range)) : 0.5;
+      const [r, g, b] = evaluateColormapValue(value, effectiveRange.min, effectiveRange.max, palette, scaleMode);
+      const alpha = Number.isFinite(value) ? Math.max(0, Math.min(1, layerOpacity)) : 0;
+
+      const wave1 = Math.sin(u * 9.0 + v * 7.0) * Math.cos(v * 8.0 - u * 6.0);
+      const wave2 = Math.sin(u * 18.0 - v * 14.0) * 0.35 * Math.cos(u * 12.0 + v * 16.0);
+      const organicWave = (wave1 + wave2) * 0.26;
+      const waveRelief = (normalized - 0.5) * 0.50 + organicWave * (0.35 - depthT * 0.15);
+
+      positions[ptr * 3] = x;
+      positions[ptr * 3 + 1] = waveRelief;
+      positions[ptr * 3 + 2] = z;
+      colors[ptr * 3] = r / 255;
+      colors[ptr * 3 + 1] = g / 255;
+      colors[ptr * 3 + 2] = b / 255;
+      alphas[ptr] = alpha;
+      uvs[ptr * 2] = u;
+      uvs[ptr * 2 + 1] = v;
+      ptr += 1;
     }
   }
 
-  geo.computeVertexNormals();
-  geo.computeBoundingBox();
-  return geo;
-}
-
-// Generate realistic geological earth crust texture (muted browns/tans with rock grain & strata - Prompt F29)
-function createEarthCrustTexture() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d');
-
-  // Base muted brown earth color
-  ctx.fillStyle = '#2d231c';
-  ctx.fillRect(0, 0, 512, 512);
-
-  // Rock sediment strata layers
-  for (let y = 0; y < 512; y += 4) {
-    const shade = Math.floor(35 + Math.sin(y * 0.08) * 15 + Math.random() * 10);
-    ctx.fillStyle = `rgba(${shade + 30}, ${shade + 20}, ${shade + 10}, 0.5)`;
-    ctx.fillRect(0, y, 512, 3 + Math.random() * 3);
-  }
-
-  // Rock speckles & grain texture
-  for (let i = 0; i < 5000; i++) {
-    const x = Math.random() * 512;
-    const y = Math.random() * 512;
-    const radius = Math.random() * 2 + 0.5;
-    const shade = Math.floor(Math.random() * 45 + 15);
-    ctx.fillStyle = `rgba(${shade + 40}, ${shade + 25}, ${shade + 10}, 0.3)`;
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2);
-  return texture;
-}
-
-
-
-// Generate satellite coastline surface texture overlay (Top plane at 0m)
-function createCoastlineSurfaceCanvas(ncols, nrows, values, minVal, maxVal, palette, scaleMode) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d');
-
-  // Base interpolated colormap heatmap
-  const rawCanvas = document.createElement('canvas');
-  rawCanvas.width = ncols;
-  rawCanvas.height = nrows;
-  const rawCtx = rawCanvas.getContext('2d');
-  const imgData = rawCtx.createImageData(ncols, nrows);
-
-  for (let r = 0; r < nrows; r++) {
-    for (let c = 0; c < ncols; c++) {
-      const val = values[r][c];
-      const [red, green, blue, alpha] = evaluateColormapValue(val, minVal, maxVal, palette, scaleMode);
-      const idx = (r * ncols + c) * 4;
-      imgData.data[idx] = red;
-      imgData.data[idx + 1] = green;
-      imgData.data[idx + 2] = blue;
-      imgData.data[idx + 3] = alpha;
+  for (let iz = 0; iz < segmentsZ; iz += 1) {
+    for (let ix = 0; ix < segmentsX; ix += 1) {
+      const a = iz * (segmentsX + 1) + ix;
+      const b = a + 1;
+      const c = a + segmentsX + 1;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
     }
   }
-  rawCtx.putImageData(imgData, 0, 0);
 
-  // Draw high-resolution smooth stretched heatmap
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(rawCanvas, 0, 0, 512, 512);
+  const topGeometry = new THREE.BufferGeometry();
+  topGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  topGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  topGeometry.setAttribute('alpha', new THREE.BufferAttribute(alphas, 1));
+  topGeometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  topGeometry.setIndex(indices);
+  topGeometry.computeVertexNormals();
 
-  // Draw crisp scientific contour lines across heatmap
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-  ctx.lineWidth = 1.5;
-  for (let y = 30; y < 512; y += 45) {
-    ctx.beginPath();
-    ctx.moveTo(0, y + Math.sin(y * 0.05) * 15);
-    ctx.bezierCurveTo(150, y - 20, 350, y + 20, 512, y + Math.cos(y * 0.05) * 15);
-    ctx.stroke();
+  const topMaterial = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    uniforms: {
+      uDepthTint: { value: depthT },
+      uSelectedBoost: { value: isSelected ? 0.20 : 0.0 },
+      uLayerOpacity: { value: layerOpacity },
+      uLightDirection: { value: new THREE.Vector3(-0.35, 0.82, 0.45).normalize() },
+    },
+    vertexShader: `
+      attribute float alpha;
+      varying vec3 vColor;
+      varying float vAlpha;
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
+      void main() {
+        vColor = color;
+        vAlpha = alpha;
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+    fragmentShader: `
+      uniform float uDepthTint;
+      uniform float uSelectedBoost;
+      uniform float uLayerOpacity;
+      uniform vec3 uLightDirection;
+      varying vec3 vColor;
+      varying float vAlpha;
+      varying vec3 vWorldPosition;
+      varying vec3 vWorldNormal;
+      void main() {
+        vec3 normal = normalize(gl_FrontFacing ? vWorldNormal : -vWorldNormal);
+        vec3 lightDirection = normalize(uLightDirection);
+        vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+        vec3 halfVector = normalize(lightDirection + viewDirection);
+
+        float frontDiffuse = max(dot(normal, lightDirection), 0.0);
+        float backDiffuse = max(dot(-normal, lightDirection), 0.0) * 0.45;
+        float diffuse = 0.82 + frontDiffuse * 0.28 + backDiffuse * 0.15;
+        float specular = pow(max(dot(normal, halfVector), 0.0), 32.0) * 0.18 * (1.0 - uDepthTint * 0.4);
+
+        vec3 shaded = vColor * diffuse + vec3(specular) + uSelectedBoost * vec3(0.20, 0.22, 0.28);
+        gl_FragColor = vec4(shaded, vAlpha * uLayerOpacity);
+      }
+    `,
+    vertexColors: true,
+    blending: THREE.NormalBlending,
+  });
+
+  const topMesh = new THREE.Mesh(topGeometry, topMaterial);
+
+  const perimeterTopPoints = [];
+  const perimeterGridIndices = [];
+
+  for (let ix = 0; ix <= segmentsX; ix++) perimeterGridIndices.push(0 * (segmentsX + 1) + ix);
+  for (let iz = 1; iz <= segmentsZ; iz++) perimeterGridIndices.push(iz * (segmentsX + 1) + segmentsX);
+  for (let ix = segmentsX - 1; ix >= 0; ix--) perimeterGridIndices.push(segmentsZ * (segmentsX + 1) + ix);
+  for (let iz = segmentsZ - 1; iz >= 1; iz--) perimeterGridIndices.push(iz * (segmentsX + 1) + 0);
+
+  const numPerimeterPoints = perimeterGridIndices.length;
+  const sidePositions = new Float32Array(numPerimeterPoints * 2 * 3);
+  const sideUvs = new Float32Array(numPerimeterPoints * 2 * 2);
+  const sideIndices = [];
+
+  for (let i = 0; i < numPerimeterPoints; i++) {
+    const gIdx = perimeterGridIndices[i];
+    const px = positions[gIdx * 3];
+    const py = positions[gIdx * 3 + 1];
+    const pz = positions[gIdx * 3 + 2];
+    perimeterTopPoints.push(new THREE.Vector3(px, py, pz));
+
+    sidePositions[(i * 2) * 3] = px;
+    sidePositions[(i * 2) * 3 + 1] = py;
+    sidePositions[(i * 2) * 3 + 2] = pz;
+    sideUvs[(i * 2) * 2] = i / numPerimeterPoints;
+    sideUvs[(i * 2) * 2 + 1] = 1.0;
+
+    sidePositions[(i * 2 + 1) * 3] = px;
+    sidePositions[(i * 2 + 1) * 3 + 1] = -TILE_THICKNESS;
+    sidePositions[(i * 2 + 1) * 3 + 2] = pz;
+    sideUvs[(i * 2 + 1) * 2] = i / numPerimeterPoints;
+    sideUvs[(i * 2 + 1) * 2 + 1] = 0.0;
   }
 
-  // Draw simulated satellite land mass (India & Bay of Bengal coastlines overlay at top left)
-  ctx.fillStyle = '#1c2e22'; // Dark satellite terrain land color
-  ctx.strokeStyle = '#3e5c47';
-  ctx.lineWidth = 2;
+  for (let i = 0; i < numPerimeterPoints; i++) {
+    const currentTop = i * 2;
+    const currentBot = i * 2 + 1;
+    const nextTop = ((i + 1) % numPerimeterPoints) * 2;
+    const nextBot = ((i + 1) % numPerimeterPoints) * 2 + 1;
 
-  // Land Mass Polygon (Northwest Coastline)
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(240, 0);
-  ctx.bezierCurveTo(220, 60, 180, 110, 140, 160);
-  ctx.bezierCurveTo(100, 200, 70, 240, 0, 290);
-  ctx.closePath();
+    sideIndices.push(currentTop, currentBot, nextTop);
+    sideIndices.push(nextTop, currentBot, nextBot);
+  }
+
+  const sideGeometry = new THREE.BufferGeometry();
+  sideGeometry.setAttribute('position', new THREE.BufferAttribute(sidePositions, 3));
+  sideGeometry.setAttribute('uv', new THREE.BufferAttribute(sideUvs, 2));
+  sideGeometry.setIndex(sideIndices);
+  sideGeometry.computeVertexNormals();
+
+  const sideMaterial = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    uniforms: {
+      uDepthTint: { value: depthT },
+      uSelectedBoost: { value: isSelected ? 0.22 : 0.0 },
+      uLayerOpacity: { value: layerOpacity },
+    },
+    vertexShader: `
+      varying vec3 vWorldPosition;
+      varying vec3 vNormal;
+      varying float vYRel;
+      void main() {
+        vYRel = position.y;
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPos.xyz;
+        vNormal = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
+      }
+    `,
+    fragmentShader: `
+      uniform float uDepthTint;
+      uniform float uSelectedBoost;
+      uniform float uLayerOpacity;
+      varying vec3 vWorldPosition;
+      varying vec3 vNormal;
+      varying float vYRel;
+      void main() {
+        vec3 lightDir = normalize(vec3(-0.35, 0.82, 0.45));
+        vec3 normal = normalize(gl_FrontFacing ? vNormal : -vNormal);
+        float diff = max(dot(normal, lightDir), 0.0) * 0.45 + 0.55;
+
+        float topGradient = smoothstep(-0.30, 0.08, vYRel);
+        vec3 topColor = mix(vec3(0.06, 0.28, 0.40), vec3(0.02, 0.14, 0.24), uDepthTint);
+        vec3 bottomColor = vec3(0.01, 0.05, 0.12);
+        vec3 slabColor = mix(bottomColor, topColor, topGradient) * diff;
+
+        vec3 activeGlow = vec3(0.0, 0.65, 0.85) * uSelectedBoost * (0.4 + topGradient * 0.6);
+        vec3 finalColor = slabColor + activeGlow;
+
+        float alpha = (0.75 + topGradient * 0.20 + uSelectedBoost * 0.20) * uLayerOpacity;
+        gl_FragColor = vec4(finalColor, alpha);
+      }
+    `,
+  });
+
+  const sideMesh = new THREE.Mesh(sideGeometry, sideMaterial);
+
+  const bottomGeometry = new THREE.PlaneGeometry(FOOTPRINT_X, FOOTPRINT_Z);
+  const bottomMaterial = new THREE.MeshBasicMaterial({
+    color: 0x040e1a,
+    transparent: true,
+    opacity: layerOpacity * 0.6,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const bottomMesh = new THREE.Mesh(bottomGeometry, bottomMaterial);
+  bottomMesh.rotation.x = Math.PI / 2;
+  bottomMesh.position.y = -TILE_THICKNESS;
+
+  const frameGeometry = new THREE.BufferGeometry().setFromPoints([
+    ...perimeterTopPoints,
+    perimeterTopPoints[0].clone(),
+  ]);
+  const frameMaterial = new THREE.LineBasicMaterial({
+    color: isSelected ? 0x00f0ff : 0x1d3d52,
+    transparent: true,
+    opacity: isSelected ? 0.85 : 0.22,
+  });
+  const frameLine = new THREE.Line(frameGeometry, frameMaterial);
+
+  const bottomPerimeterPoints = perimeterTopPoints.map(
+    (p) => new THREE.Vector3(p.x, -TILE_THICKNESS, p.z)
+  );
+  const bottomFrameGeometry = new THREE.BufferGeometry().setFromPoints([
+    ...bottomPerimeterPoints,
+    bottomPerimeterPoints[0].clone(),
+  ]);
+  const bottomFrameMaterial = new THREE.LineBasicMaterial({
+    color: isSelected ? 0x00c4e6 : 0x142b3a,
+    transparent: true,
+    opacity: isSelected ? 0.45 : 0.12,
+  });
+  const bottomFrameLine = new THREE.Line(bottomFrameGeometry, bottomFrameMaterial);
+
+  const tileGroup = new THREE.Group();
+  tileGroup.add(bottomMesh);
+  tileGroup.add(sideMesh);
+  tileGroup.add(topMesh);
+  tileGroup.add(frameLine);
+  tileGroup.add(bottomFrameLine);
+
+  const initialY = initialDepthY + (isSelected ? 0.22 : 0);
+  tileGroup.position.y = initialY;
+  tileGroup.scale.set(isSelected ? 1.015 : 1.0, 1.0, isSelected ? 1.015 : 1.0);
+
+  tileGroup.userData = {
+    depth: slice.depth,
+    topMesh,
+    sideMesh,
+    bottomMesh,
+    frameLine,
+    bottomFrameLine,
+    currentY: initialY,
+    targetY: initialY,
+    currentOpacity: layerOpacity,
+    targetOpacity: layerOpacity,
+    currentBoost: isSelected ? 0.20 : 0.0,
+    targetBoost: isSelected ? 0.20 : 0.0,
+    currentScale: isSelected ? 1.015 : 1.0,
+    targetScale: isSelected ? 1.015 : 1.0,
+  };
+
+  return tileGroup;
+}
+
+function animateTileTransitions(sliceTilesMap, depthGuidesGroup, props) {
+  const { activeDepth, availableDepths, verticalExaggeration, renderMode, sliceOpacity } = props;
+  const sortedDepths = [...availableDepths].sort((a, b) => a - b);
+  const activeIndex = Math.max(0, sortedDepths.indexOf(activeDepth));
+  const baseOpacity = sliceOpacity ?? 0.92;
+  const depthStrengths = [0.98, 0.68, 0.48, 0.36, 0.26];
+
+  sliceTilesMap.forEach((tileGroup, depth) => {
+    const sliceIndex = Math.max(0, sortedDepths.indexOf(depth));
+    const indexDistance = Math.abs(sliceIndex - activeIndex);
+    const isSelected = depth === activeDepth;
+    const depthY = getDepthYPosition(depth, availableDepths, verticalExaggeration);
+
+    const targetY = isSelected ? depthY + 0.22 : depthY;
+    const focus = depthStrengths[Math.min(indexDistance, depthStrengths.length - 1)];
+    const targetOpacity = renderMode === 'volume'
+      ? baseOpacity * Math.min(0.78, focus * 0.82)
+      : baseOpacity * focus;
+    const targetBoost = isSelected ? 0.24 : 0.0;
+    const targetScale = isSelected ? 1.015 : 1.0;
+
+    const animData = tileGroup.userData;
+
+    animate(animData, {
+      currentY: targetY,
+      currentOpacity: targetOpacity,
+      currentBoost: targetBoost,
+      currentScale: targetScale,
+      duration: 650,
+      ease: 'outCubic',
+      onUpdate: () => {
+        tileGroup.position.y = animData.currentY;
+        tileGroup.scale.set(animData.currentScale, 1.0, animData.currentScale);
+
+        if (animData.topMesh?.material?.uniforms) {
+          animData.topMesh.material.uniforms.uLayerOpacity.value = animData.currentOpacity;
+          animData.topMesh.material.uniforms.uSelectedBoost.value = animData.currentBoost;
+        }
+        if (animData.sideMesh?.material?.uniforms) {
+          animData.sideMesh.material.uniforms.uLayerOpacity.value = animData.currentOpacity;
+          animData.sideMesh.material.uniforms.uSelectedBoost.value = animData.currentBoost;
+        }
+        if (animData.bottomMesh?.material) {
+          animData.bottomMesh.material.opacity = animData.currentOpacity * 0.6;
+        }
+        if (animData.frameLine?.material) {
+          animData.frameLine.material.opacity = isSelected ? 0.85 : 0.22;
+          animData.frameLine.material.color.setHex(isSelected ? 0x00f0ff : 0x1d3d52);
+        }
+        if (animData.bottomFrameLine?.material) {
+          animData.bottomFrameLine.material.opacity = isSelected ? 0.45 : 0.12;
+          animData.bottomFrameLine.material.color.setHex(isSelected ? 0x00c4e6 : 0x142b3a);
+        }
+      },
+    });
+  });
+
+  if (depthGuidesGroup && depthGuidesGroup.children) {
+    depthGuidesGroup.children.forEach((guideGroup) => {
+      if (guideGroup.userData && guideGroup.userData.depth !== undefined) {
+        const depth = guideGroup.userData.depth;
+        const targetY = getDepthYPosition(depth, availableDepths, verticalExaggeration);
+        const isSelected = depth === activeDepth;
+
+        animate(guideGroup.position, {
+          y: targetY,
+          duration: 650,
+          ease: 'outCubic',
+        });
+
+        const sprite = guideGroup.children.find((c) => c.isSprite);
+        if (sprite && sprite.material) {
+          animate(sprite.material, {
+            opacity: isSelected ? 1.0 : 0.65,
+            duration: 400,
+            ease: 'outCubic',
+          });
+        }
+      }
+    });
+  }
+}
+
+function createWaterVolume(metrics) {
+  const geometry = new THREE.BoxGeometry(FOOTPRINT_X, metrics.waterHeight, FOOTPRINT_Z, 1, 16, 1);
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.BackSide,
+    uniforms: {
+      uTop: { value: metrics.surfaceY + 0.2 },
+      uBottom: { value: metrics.deepestSliceY - 0.5 },
+    },
+    vertexShader: `
+      varying vec3 vWorldPosition;
+      void main() {
+        vec4 world = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = world.xyz;
+        gl_Position = projectionMatrix * viewMatrix * world;
+      }
+    `,
+    fragmentShader: `
+      uniform float uTop;
+      uniform float uBottom;
+      varying vec3 vWorldPosition;
+      void main() {
+        float t = clamp((uTop - vWorldPosition.y) / max(0.001, uTop - uBottom), 0.0, 1.0);
+        vec3 topColor = vec3(0.03, 0.32, 0.48);
+        vec3 bottomColor = vec3(0.005, 0.025, 0.075);
+        vec3 color = mix(topColor, bottomColor, t);
+        float alpha = mix(0.045, 0.16, t);
+        gl_FragColor = vec4(color, alpha);
+      }
+    `,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.y = metrics.waterCenterY;
+  mesh.renderOrder = 2;
+  return mesh;
+}
+
+function createWaterColumnWalls(metrics) {
+  const group = new THREE.Group();
+  const wallMaterial = new THREE.MeshBasicMaterial({
+    color: 0x0c6f8d,
+    transparent: true,
+    opacity: 0.038,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const edgeMaterial = new THREE.LineBasicMaterial({
+    color: 0x33596b,
+    transparent: true,
+    opacity: 0.055,
+  });
+  const y = metrics.waterCenterY;
+  const h = metrics.waterHeight;
+  const zBack = FOOTPRINT_Z / 2;
+  const zFront = -FOOTPRINT_Z / 2;
+  const xLeft = -FOOTPRINT_X / 2;
+  const xRight = FOOTPRINT_X / 2;
+
+  [
+    { geo: new THREE.PlaneGeometry(FOOTPRINT_X, h), pos: [0, y, zBack], rot: [0, 0, 0] },
+    { geo: new THREE.PlaneGeometry(FOOTPRINT_X, h), pos: [0, y, zFront], rot: [0, Math.PI, 0] },
+    { geo: new THREE.PlaneGeometry(FOOTPRINT_Z, h), pos: [xLeft, y, 0], rot: [0, Math.PI / 2, 0] },
+    { geo: new THREE.PlaneGeometry(FOOTPRINT_Z, h), pos: [xRight, y, 0], rot: [0, -Math.PI / 2, 0] },
+  ].forEach(({ geo, pos, rot }) => {
+    const wall = new THREE.Mesh(geo, wallMaterial.clone());
+    wall.position.set(...pos);
+    wall.rotation.set(...rot);
+    wall.renderOrder = 4;
+    group.add(wall);
+  });
+
+  [
+    [xLeft, zFront],
+    [xRight, zFront],
+    [xLeft, zBack],
+    [xRight, zBack],
+  ].forEach(([x, z]) => {
+    group.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(x, metrics.surfaceY, z),
+        new THREE.Vector3(x, metrics.deepestSliceY - 0.25, z),
+      ]),
+      edgeMaterial.clone(),
+    ));
+  });
+
+  return group;
+}
+
+function createOceanSurface() {
+  const geometry = new THREE.PlaneGeometry(FOOTPRINT_X, FOOTPRINT_Z, 160, 120);
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    uniforms: {
+      uTime: { value: 0 },
+    },
+    vertexShader: `
+      uniform float uTime;
+      varying vec2 vUv;
+      varying float vWave;
+      void main() {
+        vUv = uv;
+        vec3 p = position;
+        float wave = sin(p.x * 1.4 + uTime * 0.7) * 0.025 + cos(p.y * 1.7 - uTime * 0.45) * 0.018;
+        p.z += wave;
+        vWave = wave;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec2 vUv;
+      varying float vWave;
+      void main() {
+        float rim = smoothstep(0.0, 0.18, min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y)));
+        vec3 color = mix(vec3(0.02, 0.18, 0.25), vec3(0.10, 0.55, 0.68), 0.45 + vWave * 4.0);
+        gl_FragColor = vec4(color, 0.18 * rim);
+      }
+    `,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = 0.09;
+  mesh.renderOrder = 900;
+  return mesh;
+}
+
+function terrainHeight(x, z) {
+  const shelf = THREE.MathUtils.smoothstep(-x, -7.5, 2.5) * 1.25;
+  const ridge = Math.exp(-Math.pow((x + 3.4) / 2.2, 2)) * (0.8 + Math.sin(z * 1.4) * 0.18);
+  const basin = -Math.exp(-Math.pow((x - 3.6) / 4.0, 2)) * 0.55;
+  const relief = Math.sin(x * 1.7 + z * 0.8) * 0.12 + Math.cos(x * 0.55 - z * 1.1) * 0.16;
+  return shelf + ridge + basin + relief;
+}
+
+function createSeafloor(metrics) {
+  const geometry = new THREE.PlaneGeometry(FOOTPRINT_X * 1.14, FOOTPRINT_Z * 1.16, 100, 80);
+  const pos = geometry.attributes.position;
+  const colors = [];
+
+  for (let i = 0; i < pos.count; i += 1) {
+    const x = pos.getX(i);
+    const z = pos.getY(i);
+    const h = terrainHeight(x, z) * 0.45;
+    pos.setZ(i, h);
+
+    const c = new THREE.Color(0x0a1c2e);
+    c.lerp(new THREE.Color(0x020b14), THREE.MathUtils.clamp(0.5 - h * 0.2, 0.0, 1.0));
+    colors.push(c.r, c.g, c.b);
+  }
+
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.90,
+    metalness: 0.1,
+    side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = metrics.seafloorY;
+  return mesh;
+}
+
+function createCoastContext(metrics) {
+  const shape = new THREE.Shape();
+  shape.moveTo(-8.6, -6.2);
+  shape.lineTo(-8.6, 5.9);
+  shape.lineTo(-1.2, 5.9);
+  shape.bezierCurveTo(-1.6, 4.8, -2.7, 3.5, -3.9, 2.6);
+  shape.bezierCurveTo(-4.8, 1.7, -5.3, 0.4, -5.8, -1.0);
+  shape.bezierCurveTo(-6.4, -2.6, -7.4, -4.4, -8.6, -6.2);
+
+  const geometry = new THREE.ShapeGeometry(shape, 40);
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x385334,
+    roughness: 0.8,
+    metalness: 0,
+    transparent: true,
+    opacity: 0.92,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = metrics.surfaceY + 0.13;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+function createDepthLabelTexture(text, isSelected) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 144;
+  canvas.height = 56;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = isSelected ? 'rgba(190, 219, 228, 0.86)' : 'rgba(8, 18, 31, 0.58)';
+  ctx.strokeStyle = isSelected ? 'rgba(255, 255, 255, 0.52)' : 'rgba(116, 151, 166, 0.14)';
+  ctx.lineWidth = isSelected ? 2 : 1;
+  ctx.roundRect(14, 10, 116, 36, 6);
   ctx.fill();
   ctx.stroke();
-
-  // Coastal shelf boundary line
-  ctx.strokeStyle = 'rgba(0, 255, 255, 0.6)';
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([4, 4]);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  return canvas;
-}
-
-// 3D Depth Scale Labels Text Canvas generator (High-contrast callout badges)
-function createDepthLabelTexture(text, isSelected, isAdjacent) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 140;
-  canvas.height = 64;
-  const ctx = canvas.getContext('2d');
-
-  if (isSelected) {
-    ctx.fillStyle = 'rgba(0, 210, 255, 0.9)';
-    ctx.roundRect(4, 4, 132, 56, 10);
-    ctx.fill();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    ctx.fillStyle = '#040d1a';
-    ctx.font = 'bold 26px monospace';
-  } else if (isAdjacent) {
-    ctx.fillStyle = 'rgba(11, 19, 37, 0.85)';
-    ctx.roundRect(4, 4, 132, 56, 8);
-    ctx.fill();
-    ctx.strokeStyle = '#00d2ff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ctx.fillStyle = '#00ffff';
-    ctx.font = 'bold 22px monospace';
-  } else {
-    ctx.fillStyle = 'rgba(8, 14, 28, 0.65)';
-    ctx.roundRect(4, 4, 132, 56, 8);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0, 210, 255, 0.3)';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    ctx.fillStyle = '#64748b';
-    ctx.font = '20px monospace';
-  }
-
+  ctx.font = isSelected ? 'bold 19px monospace' : '16px monospace';
+  ctx.fillStyle = isSelected ? '#102a35' : '#8fa0ad';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, 70, 32);
+  ctx.fillText(text, 72, 28);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
   return texture;
+}
+
+function createDepthGuides(props) {
+  const group = new THREE.Group();
+  const { availableDepths, activeDepth, verticalExaggeration } = props;
+  const depths = availableDepths.length ? availableDepths : [0, 50, 100, 200, 500];
+  depths.forEach((depth) => {
+    const y = getDepthYPosition(depth, depths, verticalExaggeration);
+    const isSelected = depth === activeDepth;
+
+    const lineGroup = new THREE.Group();
+    lineGroup.userData.depth = depth;
+
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(FOOTPRINT_X / 2 - 0.05, 0, FOOTPRINT_Z / 2 + 0.1),
+      new THREE.Vector3(FOOTPRINT_X / 2 + 0.95, 0, FOOTPRINT_Z / 2 + 0.1),
+    ]);
+    const line = new THREE.Line(
+      lineGeometry,
+      new THREE.LineBasicMaterial({
+        color: isSelected ? 0x00f0ff : 0x263f4e,
+        transparent: true,
+        opacity: isSelected ? 0.65 : 0.15,
+      }),
+    );
+    lineGroup.add(line);
+
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: createDepthLabelTexture(`${depth}m`, isSelected),
+      transparent: true,
+      opacity: isSelected ? 1 : 0.72,
+      depthWrite: false,
+    }));
+    sprite.position.set(FOOTPRINT_X / 2 + 1.65, 0, FOOTPRINT_Z / 2 + 0.1);
+    sprite.scale.set(isSelected ? 1.02 : 0.84, isSelected ? 0.4 : 0.34, 1);
+    lineGroup.add(sprite);
+
+    lineGroup.position.y = y;
+    group.add(lineGroup);
+  });
+
+  const cornerMaterial = new THREE.LineBasicMaterial({ color: 0x294b5c, transparent: true, opacity: 0.075 });
+  [
+    [-FOOTPRINT_X / 2, -FOOTPRINT_Z / 2],
+    [FOOTPRINT_X / 2, -FOOTPRINT_Z / 2],
+    [FOOTPRINT_X / 2, FOOTPRINT_Z / 2],
+  ].forEach(([x, z]) => {
+    const yBottom = getDepthYPosition(Math.max(...depths), depths, verticalExaggeration) - 0.25;
+    const guide = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 0, z), new THREE.Vector3(x, yBottom, z)]),
+      cornerMaterial.clone(),
+    );
+    group.add(guide);
+  });
+
+  return group;
+}
+
+function rebuildSlicesMesh(slicesGroup, depthGuidesGroup, sliceTilesMapRef, props) {
+  clearGroup(slicesGroup);
+  clearGroup(depthGuidesGroup);
+  sliceTilesMapRef.current.clear();
+
+  if (!slicesDataIsRenderable(props.slicesData)) return;
+
+  const rawRange = collectFieldRange(props.slicesData);
+  const effectiveRange = {
+    min: props.minOverride !== null ? props.minOverride : rawRange.min,
+    max: props.maxOverride !== null ? props.maxOverride : rawRange.max,
+  };
+
+  props.slicesData.forEach((slice) => {
+    if (!slice.values?.length) return;
+    const tileGroup = createRealTileGroup(slice, props, effectiveRange);
+    sliceTilesMapRef.current.set(slice.depth, tileGroup);
+    slicesGroup.add(tileGroup);
+  });
+
+  depthGuidesGroup.add(createDepthGuides(props));
+  animateTileTransitions(sliceTilesMapRef.current, depthGuidesGroup, props);
+}
+
+function slicesDataIsRenderable(slicesData) {
+  return Array.isArray(slicesData) && slicesData.some((slice) => slice.values?.length && slice.values[0]?.length);
+}
+
+function createObservationHaloTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 96;
+  canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(48, 48, 3, 48, 48, 45);
+  gradient.addColorStop(0, 'rgba(210, 242, 250, 0.72)');
+  gradient.addColorStop(0.28, 'rgba(124, 201, 218, 0.22)');
+  gradient.addColorStop(1, 'rgba(124, 201, 218, 0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 96, 96);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return texture;
+}
+
+function rebuildFloatsMesh(floatsGroup, props) {
+  clearGroup(floatsGroup);
+  const { floatsData, slicesData, availableDepths, verticalExaggeration } = props;
+  if (!Array.isArray(floatsData)) return;
+
+  const bounds = getDomainBounds(slicesData || []);
+  const deepestY = getDepthYPosition(Math.max(...(availableDepths.length ? availableDepths : [500])), availableDepths, verticalExaggeration);
+
+  floatsData.forEach((float) => {
+    const lat = Number(float.lat);
+    const lon = Number(float.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+    const { x, z } = projectLonLat(lon, lat, bounds);
+    const group = new THREE.Group();
+    group.position.set(x, 0.26, z);
+    group.userData.float_id = float.float_id;
+
+    const stemHeight = Math.abs(deepestY) + 0.4;
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.006, 0.006, stemHeight, 8),
+      new THREE.MeshBasicMaterial({ color: 0x9cc9d4, transparent: true, opacity: 0.11 }),
+    );
+    stem.position.y = -stemHeight / 2;
+    stem.userData.float_id = float.float_id;
+    group.add(stem);
+
+    const sensor = new THREE.Mesh(
+      new THREE.SphereGeometry(0.065, 16, 16),
+      new THREE.MeshStandardMaterial({
+        color: 0xd8f4f8,
+        emissive: 0x4faebe,
+        emissiveIntensity: 0.12,
+        roughness: 0.46,
+        metalness: 0,
+      }),
+    );
+    sensor.userData.float_id = float.float_id;
+    group.add(sensor);
+
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: createObservationHaloTexture(),
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
+      color: 0xd8f4f8,
+    }));
+    halo.scale.set(0.34, 0.34, 1);
+    halo.userData.float_id = float.float_id;
+    group.add(halo);
+
+    floatsGroup.add(group);
+  });
+}
+
+function rebuildStaticMeshes(staticGroup, props) {
+  clearGroup(staticGroup);
+  const metrics = getSceneMetrics(props.availableDepths, props.verticalExaggeration);
+  staticGroup.add(createWaterVolume(metrics));
+  staticGroup.add(createWaterColumnWalls(metrics));
+  staticGroup.add(createSeafloor(metrics));
+
+  const surface = createOceanSurface();
+  surface.userData.isOceanSurface = true;
+  staticGroup.add(surface);
 }
 
 export default function Scene({
   slicesData = [],
   activeDepth = 0,
+  availableDepths = [0, 50, 100, 200, 500],
   activeVariable = 'temperature',
   floatsData = [],
   onFloatSelect,
@@ -226,19 +919,24 @@ export default function Scene({
   minOverride = null,
   maxOverride = null,
   renderMode = 'slices',
+  verticalExaggeration = 1.0,
+  sliceOpacity = 0.92,
 }) {
   const mountRef = useRef(null);
-  const sceneRef = useRef(null);
-  const cameraRef = useRef(null);
   const rendererRef = useRef(null);
+  const cameraRef = useRef(null);
+  const controlsRef = useRef(null);
+  const sceneRef = useRef(null);
+  const staticGroupRef = useRef(null);
   const slicesGroupRef = useRef(null);
   const floatsGroupRef = useRef(null);
-  const depthLabelsGroupRef = useRef(null);
+  const depthGuidesGroupRef = useRef(null);
+  const sliceTilesMapRef = useRef(new Map());
 
-  // Store current props in ref for instantaneous remount rendering
   const propsRef = useRef({
     slicesData,
     activeDepth,
+    availableDepths,
     activeVariable,
     floatsData,
     palette,
@@ -246,12 +944,15 @@ export default function Scene({
     minOverride,
     maxOverride,
     renderMode,
+    verticalExaggeration,
+    sliceOpacity,
   });
 
   useEffect(() => {
     propsRef.current = {
       slicesData,
       activeDepth,
+      availableDepths,
       activeVariable,
       floatsData,
       palette,
@@ -259,172 +960,154 @@ export default function Scene({
       minOverride,
       maxOverride,
       renderMode,
+      verticalExaggeration,
+      sliceOpacity,
     };
-  }, [slicesData, activeDepth, activeVariable, floatsData, palette, scaleMode, minOverride, maxOverride, renderMode]);
+  }, [slicesData, activeDepth, availableDepths, activeVariable, floatsData, palette, scaleMode, minOverride, maxOverride, renderMode, verticalExaggeration, sliceOpacity]);
 
-  // 1. Primary Scene Initialization & Event Loop
   useEffect(() => {
     const container = mountRef.current;
-    if (!container) return;
+    if (!container) return undefined;
 
-    const width = container.clientWidth || (window.innerWidth - 288);
+    const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
-
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x040814);
-    scene.fog = new THREE.FogExp2(0x040814, 0.02);
+    scene.background = new THREE.Color(0x020713);
+    scene.fog = new THREE.FogExp2(0x061120, 0.026);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 1000);
-    camera.position.set(16, 13, 23);
+    const camera = new THREE.PerspectiveCamera(34, width / height, 0.1, 1000);
+    camera.position.set(10.8, 7.2, 12.0);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.18;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     rendererRef.current = renderer;
 
-    while (container.firstChild) {
-      container.removeChild(container.firstChild);
-    }
+    while (container.firstChild) container.removeChild(container.firstChild);
     container.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.target.set(0, -6.0, 0);
+    controls.dampingFactor = 0.06;
+    controls.target.set(0.25, -4.55, -0.25);
+    controls.minDistance = 8;
+    controls.maxDistance = 32;
+    controls.maxPolarAngle = Math.PI * 0.78;
+    controlsRef.current = controls;
 
-    // 💡 Cinematic Lighting Setup
-    const ambientLight = new THREE.AmbientLight(0xd0e8ff, 0.85);
-    scene.add(ambientLight);
+    scene.add(new THREE.HemisphereLight(0xc7efff, 0x09111f, 1.15));
 
-    const mainSun = new THREE.DirectionalLight(0xffffff, 1.25);
-    mainSun.position.set(15, 25, 15);
-    mainSun.castShadow = true;
-    scene.add(mainSun);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.95);
+    sun.position.set(-6, 12, 8);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 45;
+    sun.shadow.camera.left = -18;
+    sun.shadow.camera.right = 18;
+    sun.shadow.camera.top = 18;
+    sun.shadow.camera.bottom = -18;
+    scene.add(sun);
 
-    const cyanRimLight = new THREE.DirectionalLight(0x00ffff, 0.75);
-    cyanRimLight.position.set(-15, -10, -15);
-    scene.add(cyanRimLight);
+    const sideLight = new THREE.DirectionalLight(0x8bd8e8, 0.22);
+    sideLight.position.set(9, -2, -9);
+    scene.add(sideLight);
 
-    // 🪨 Solid Geological Earth Crust Block (Prompt F29)
-    const crustGeo = createSolidCrustGeometry();
-    const crustMat = new THREE.MeshStandardMaterial({
-      map: createEarthCrustTexture(),
-      color: 0x4a3c31, // Muted geological rock brown/tan
-      roughness: 0.90,
-      metalness: 0.10,
-      flatShading: false,
-    });
-    const crustMesh = new THREE.Mesh(crustGeo, crustMat);
-    crustMesh.position.set(0, CALCULATED_CRUST_Y_POS, 0); // Guaranteed 2.0 unit clearance beneath deepest slice
-    crustMesh.receiveShadow = true;
-    scene.add(crustMesh);
+    const terrainGrazingLight = new THREE.DirectionalLight(0xffdfb0, 0.38);
+    terrainGrazingLight.position.set(10, 5, 3);
+    scene.add(terrainGrazingLight);
 
-    // 📦 Glass Bounding Box Guide Lines
-    const boundingGroup = new THREE.Group();
-    scene.add(boundingGroup);
-
-    const boxGeo = new THREE.BoxGeometry(12, 14.5, 12);
-    const boxEdges = new THREE.EdgesGeometry(boxGeo);
-    const boxMat = new THREE.LineBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.25 });
-    const boxMesh = new THREE.LineSegments(boxEdges, boxMat);
-    boxMesh.position.set(0, -6.5, 0);
-
-    boundingGroup.add(boxMesh);
-
-    // Depth Labels Group (Dynamic Leader Lines terminating at plane edges)
-    const depthLabelsGroup = new THREE.Group();
-    scene.add(depthLabelsGroup);
-    depthLabelsGroupRef.current = depthLabelsGroup;
-
-    // Mesh Groups for Slices & Argo Floats
+    const staticGroup = new THREE.Group();
     const slicesGroup = new THREE.Group();
-    scene.add(slicesGroup);
-    slicesGroupRef.current = slicesGroup;
-
     const floatsGroup = new THREE.Group();
-    scene.add(floatsGroup);
+    const depthGuidesGroup = new THREE.Group();
+    staticGroupRef.current = staticGroup;
+    slicesGroupRef.current = slicesGroup;
     floatsGroupRef.current = floatsGroup;
+    depthGuidesGroupRef.current = depthGuidesGroup;
+    scene.add(staticGroup, slicesGroup, floatsGroup, depthGuidesGroup);
 
-    // Initial Mesh Assembly
-    rebuildSlicesMesh(slicesGroup, depthLabelsGroup, propsRef.current);
+    rebuildStaticMeshes(staticGroup, propsRef.current);
+    rebuildSlicesMesh(slicesGroup, depthGuidesGroup, sliceTilesMapRef, propsRef.current);
     rebuildFloatsMesh(floatsGroup, propsRef.current);
 
-    // Raycasting Event Handling
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    const handlePointerDown = (event) => {
-      if (!floatsGroupRef.current || !cameraRef.current || !rendererRef.current) return;
-      const rect = rendererRef.current.domElement.getBoundingClientRect();
+    const updateMouse = (event) => {
+      const rect = renderer.domElement.getBoundingClientRect();
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+    };
 
-      raycaster.setFromCamera(mouse, cameraRef.current);
-      const intersects = raycaster.intersectObjects(floatsGroupRef.current.children, true);
+    const pickFloat = () => {
+      const hits = raycaster.intersectObjects(floatsGroup.children, true);
+      if (!hits.length) return null;
+      let obj = hits[0].object;
+      while (obj && !obj.userData.float_id && obj.parent) obj = obj.parent;
+      return obj?.userData.float_id ?? null;
+    };
 
-      if (intersects.length > 0) {
-        let obj = intersects[0].object;
-        while (obj && !obj.userData.float_id && obj.parent) {
-          obj = obj.parent;
-        }
-
-        if (obj && obj.userData.float_id) {
-          const clickedFloatId = obj.userData.float_id;
-          console.log(`[Scene Raycaster] Selected Argo Float Marker: ${clickedFloatId}`);
-          if (onFloatSelect) onFloatSelect(clickedFloatId);
-        }
-      }
+    const handlePointerDown = (event) => {
+      updateMouse(event);
+      const floatId = pickFloat();
+      if (floatId && onFloatSelect) onFloatSelect(floatId);
     };
 
     const handlePointerMove = (event) => {
-      if (!floatsGroupRef.current || !cameraRef.current || !rendererRef.current) return;
-      const rect = rendererRef.current.domElement.getBoundingClientRect();
-      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-      raycaster.setFromCamera(mouse, cameraRef.current);
-      const intersects = raycaster.intersectObjects(floatsGroupRef.current.children, true);
-
-      if (intersects.length > 0) {
-        rendererRef.current.domElement.style.cursor = 'pointer';
-      } else {
-        rendererRef.current.domElement.style.cursor = 'grab';
-      }
+      updateMouse(event);
+      renderer.domElement.style.cursor = pickFloat() ? 'pointer' : 'grab';
     };
 
-    const domElem = renderer.domElement;
-    domElem.addEventListener('pointerdown', handlePointerDown);
-    domElem.addEventListener('pointermove', handlePointerMove);
+    renderer.domElement.addEventListener('pointerdown', handlePointerDown);
+    renderer.domElement.addEventListener('pointermove', handlePointerMove);
 
-    // Animation Loop with Dynamic Back-to-Front Render Order Sorting
-    let animationFrameId;
-    let animTime = 0;
+    let frameId;
+    const clock = new THREE.Clock();
     const animate = () => {
-      animationFrameId = requestAnimationFrame(animate);
-      animTime += 0.02;
+      frameId = requestAnimationFrame(animate);
+      const elapsed = clock.getElapsedTime();
       controls.update();
 
-      if (floatsGroupRef.current) {
-        floatsGroupRef.current.children.forEach((marker) => {
-          marker.position.y += Math.sin(animTime * 2.5 + marker.position.x) * 0.002;
-        });
-      }
+      staticGroup.children.forEach((child) => {
+        if (child.userData.isOceanSurface && child.material?.uniforms?.uTime) {
+          child.material.uniforms.uTime.value = elapsed;
+        }
+      });
 
-      // 1. Dynamic Per-Frame Camera Distance Render Order Sorting for Transparent Slices
-      if (slicesGroupRef.current && cameraRef.current) {
-        const camPos = cameraRef.current.position;
-        const sliceMeshes = [...slicesGroupRef.current.children];
-        sliceMeshes.sort((a, b) => {
-          const distA = a.position.distanceTo(camPos);
-          const distB = b.position.distanceTo(camPos);
-          return distB - distA; // Descending: furthest mesh first (lowest renderOrder)
-        });
-        sliceMeshes.forEach((mesh, index) => {
-          mesh.renderOrder = index;
+      floatsGroup.children.forEach((marker, index) => {
+        marker.children[1].position.y = Math.sin(elapsed * 1.8 + index) * 0.035;
+      });
+
+      if (cameraRef.current && slicesGroupRef.current && propsRef.current.availableDepths?.length) {
+        const cameraY = cameraRef.current.position.y;
+        const metrics = getSceneMetrics(propsRef.current.availableDepths, propsRef.current.verticalExaggeration);
+        const isCameraAbove = cameraY > metrics.waterCenterY;
+        const sortedDepths = [...propsRef.current.availableDepths].sort((a, b) => a - b);
+
+        slicesGroupRef.current.children.forEach((tileGroup) => {
+          if (tileGroup.userData && tileGroup.userData.depth !== undefined) {
+            const depth = tileGroup.userData.depth;
+            const depthIndex = sortedDepths.indexOf(depth);
+
+            const baseOrder = isCameraAbove
+              ? 1000 + depthIndex * 40
+              : 1000 + (sortedDepths.length - depthIndex) * 40;
+
+            tileGroup.renderOrder = baseOrder;
+            if (tileGroup.userData.bottomMesh) tileGroup.userData.bottomMesh.renderOrder = baseOrder;
+            if (tileGroup.userData.sideMesh) tileGroup.userData.sideMesh.renderOrder = baseOrder + 1;
+            if (tileGroup.userData.topMesh) tileGroup.userData.topMesh.renderOrder = baseOrder + 2;
+            if (tileGroup.userData.frameLine) tileGroup.userData.frameLine.renderOrder = baseOrder + 3;
+          }
         });
       }
 
@@ -433,8 +1116,7 @@ export default function Scene({
     animate();
 
     const handleResize = () => {
-      if (!container) return;
-      const w = container.clientWidth || (window.innerWidth - 288);
+      const w = container.clientWidth || window.innerWidth;
       const h = container.clientHeight || window.innerHeight;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
@@ -443,459 +1125,50 @@ export default function Scene({
     window.addEventListener('resize', handleResize);
 
     return () => {
-      domElem.removeEventListener('pointerdown', handlePointerDown);
-      domElem.removeEventListener('pointermove', handlePointerMove);
+      renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
+      renderer.domElement.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(animationFrameId);
+      cancelAnimationFrame(frameId);
+      disposeObject(scene);
+      renderer.dispose();
       if (renderer.domElement && container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
-      renderer.dispose();
     };
   }, [onFloatSelect]);
 
-  // 2. Rebuild Slices Effect on Prop Updates
   useEffect(() => {
-    if (slicesGroupRef.current && depthLabelsGroupRef.current) {
-      rebuildSlicesMesh(slicesGroupRef.current, depthLabelsGroupRef.current, {
-        slicesData,
-        activeDepth,
-        activeVariable,
-        palette,
-        scaleMode,
-        minOverride,
-        maxOverride,
-        renderMode,
-      });
-    }
-  }, [slicesData, activeDepth, activeVariable, palette, scaleMode, minOverride, maxOverride, renderMode]);
+    if (!staticGroupRef.current || !slicesGroupRef.current || !depthGuidesGroupRef.current || !floatsGroupRef.current) return;
+    rebuildStaticMeshes(staticGroupRef.current, propsRef.current);
+    rebuildSlicesMesh(slicesGroupRef.current, depthGuidesGroupRef.current, sliceTilesMapRef, propsRef.current);
+    rebuildFloatsMesh(floatsGroupRef.current, propsRef.current);
+  }, [slicesData, palette, scaleMode, minOverride, maxOverride]);
 
-  // 3. Rebuild Argo Float Markers Effect on Prop Updates
   useEffect(() => {
-    if (floatsGroupRef.current) {
-      rebuildFloatsMesh(floatsGroupRef.current, { floatsData });
-    }
+    if (!sliceTilesMapRef.current.size || !depthGuidesGroupRef.current) return;
+    animateTileTransitions(sliceTilesMapRef.current, depthGuidesGroupRef.current, propsRef.current);
+  }, [activeDepth, availableDepths, renderMode, verticalExaggeration, sliceOpacity]);
+
+  useEffect(() => {
+    if (floatsGroupRef.current) rebuildFloatsMesh(floatsGroupRef.current, propsRef.current);
   }, [floatsData]);
 
   return (
     <div className="relative w-full h-full select-none">
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
-      {/* Top Right Variable & Isolated Depth Overlay Badge */}
-      <div className="absolute top-4 right-4 bg-ocean-panel/90 backdrop-blur-xl border border-ocean-border/80 px-4 py-2 rounded-xl text-xs font-mono text-cyan-300 shadow-2xl flex items-center gap-3">
-        <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
+      <div className="absolute top-4 right-4 bg-ocean-panel/70 backdrop-blur-md border border-slate-700/50 px-3.5 py-2 rounded-lg text-[11px] font-mono text-slate-300 shadow-xl flex items-center gap-3">
+        <div className="w-2 h-2 rounded-full bg-cyan-300/80" />
         <div>
           Variable: <span className="text-white font-bold tracking-wide">{activeVariable.toUpperCase()}</span>
         </div>
         <div>
-          Isolated Depth: <span className="text-cyan-400 font-bold">{activeDepth}m</span>
+          Selected Depth: <span className="text-cyan-200 font-bold">{activeDepth}m</span>
+        </div>
+        <div className="hidden xl:block text-slate-400">
+          {VARIABLE_UNITS[activeVariable] || ''}
         </div>
       </div>
     </div>
   );
-}
-
-
-// 🛠️ Helper: Generate displaced 3D BufferGeometry for 12x12 depth slices (Prompt F28 & F30)
-function createDisplacedSliceGeometry(depth, values, effectiveMin, effectiveMax) {
-  // 64x64 subdivisions give 65x65 = 4,225 vertices across 12x12 footprint
-  const geo = new THREE.PlaneGeometry(12, 12, 64, 64);
-  const pos = geo.attributes.position;
-
-  // Depth-appropriate displacement amplitude scaling:
-  const amplitudeMap = { 0: 0.50, 50: 0.35, 100: 0.22, 150: 0.18, 200: 0.14, 300: 0.11, 400: 0.09, 500: 0.08 };
-  const amplitude = amplitudeMap[depth] ?? Math.max(0.06, 0.50 * Math.exp(-depth / 150.0));
-
-  const nrows = values ? values.length : 0;
-  const ncols = values && values[0] ? values[0].length : 0;
-  const range = effectiveMax - effectiveMin || 1.0;
-
-  for (let i = 0; i < pos.count; i++) {
-    const vx = pos.getX(i); // Local X [-6 .. +6]
-    const vy = pos.getY(i); // Local Y [-6 .. +6]
-
-    // 1. Organic multi-octave wave noise across 12x12 surface
-    const n1 = Math.sin(vx * 0.7 + vy * 0.5) * Math.cos(vy * 0.6 - vx * 0.4);
-    const n2 = Math.sin(vx * 1.5 - vy * 1.2) * 0.4 * Math.cos(vx * 1.1 + vy * 1.3);
-    const organicNoise = (n1 + n2) * 0.5;
-
-    // 2. Real field data influence (if values grid available)
-    let dataNormalized = 0.5;
-    if (nrows > 0 && ncols > 0) {
-      const u = Math.max(0, Math.min(1.0, (vx + 6.0) / 12.0));
-      const v = Math.max(0, Math.min(1.0, (vy + 6.0) / 12.0));
-      const rIdx = Math.max(0, Math.min(nrows - 1, Math.floor((1.0 - v) * nrows)));
-      const cIdx = Math.max(0, Math.min(ncols - 1, Math.floor(u * ncols)));
-      const rawVal = values[rIdx][cIdx];
-      if (rawVal !== null && rawVal !== undefined && !isNaN(rawVal)) {
-        dataNormalized = Math.max(0, Math.min(1.0, (rawVal - effectiveMin) / range));
-      }
-    }
-
-    // Blend: 40% real field data + 60% organic wave noise
-    const blendedRelief = (dataNormalized - 0.5) * 0.8 + organicNoise * 0.6;
-    const zDisplacement = blendedRelief * amplitude;
-    pos.setZ(i, zDisplacement);
-  }
-
-  geo.computeVertexNormals();
-  geo.computeBoundingBox();
-  return geo;
-}
-
-// 🛠️ Helper: Extract outer 12x12 perimeter loop
-function createPerimeterBorderGeometry(displacedGeo, gridX = 64, gridY = 64) {
-  const pos = displacedGeo.attributes.position;
-  const numCols = gridX + 1;
-  const numRows = gridY + 1;
-
-  const points = [];
-
-  for (let c = 0; c < numCols; c++) {
-    points.push(new THREE.Vector3(pos.getX(c), pos.getY(c), pos.getZ(c)));
-  }
-  for (let r = 1; r < numRows; r++) {
-    const idx = r * numCols + (numCols - 1);
-    points.push(new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)));
-  }
-  for (let c = numCols - 2; c >= 0; c--) {
-    const idx = (numRows - 1) * numCols + c;
-    points.push(new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)));
-  }
-  for (let r = numRows - 2; r >= 1; r--) {
-    const idx = r * numCols;
-    points.push(new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)));
-  }
-
-  return new THREE.BufferGeometry().setFromPoints(points);
-}
-
-// 🛠️ Helper: Render Subsurface Real Data Slice Canvas
-function createSubsurfaceSliceCanvas(ncols, nrows, values, effectiveMin, effectiveMax, palette, scaleMode) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d');
-
-  const rawCanvas = document.createElement('canvas');
-  rawCanvas.width = ncols;
-  rawCanvas.height = nrows;
-  const rawCtx = rawCanvas.getContext('2d');
-  const imgData = rawCtx.createImageData(ncols, nrows);
-
-  for (let r = 0; r < nrows; r++) {
-    for (let c = 0; c < ncols; c++) {
-      const val = values[r][c];
-      const [red, green, blue, alpha] = evaluateColormapValue(val, effectiveMin, effectiveMax, palette, scaleMode);
-      const idx = (r * ncols + c) * 4;
-      imgData.data[idx] = red;
-      imgData.data[idx + 1] = green;
-      imgData.data[idx + 2] = blue;
-      imgData.data[idx + 3] = alpha;
-    }
-  }
-  rawCtx.putImageData(imgData, 0, 0);
-
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(rawCanvas, 0, 0, 512, 512);
-
-  // Isolines overlay inside real data region
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-  ctx.lineWidth = 1;
-  for (let y = 30; y < 512; y += 40) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(512, y);
-    ctx.stroke();
-  }
-
-  return canvas;
-}
-
-// 🛠️ Helper: Render Desaturated Vertical Filler Slice Canvas (Visual-only gap filler)
-function createFillerSliceCanvas() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d');
-
-  // Muted desaturated slate-blue tint
-  ctx.fillStyle = '#08172c';
-  ctx.fillRect(0, 0, 256, 256);
-
-  ctx.strokeStyle = 'rgba(0, 210, 255, 0.08)';
-  ctx.lineWidth = 1;
-  for (let i = 0; i < 256; i += 32) {
-    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 256); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(256, i); ctx.stroke();
-  }
-
-  return canvas;
-}
-
-// 🛠️ Helper: Render Stacked 3D Slice Heatmaps with Multi-Layer Visibility & Vertical Filler Slices (Prompt F30 Revised)
-function rebuildSlicesMesh(slicesGroup, depthLabelsGroup, props) {
-  const { slicesData, activeDepth, palette, scaleMode, minOverride, maxOverride, renderMode } = props;
-  if (!slicesGroup || !slicesData || slicesData.length === 0) return;
-
-  // Clear Slices Group
-  while (slicesGroup.children.length > 0) {
-    const obj = slicesGroup.children[0];
-    slicesGroup.remove(obj);
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) {
-      if (obj.material.map) obj.material.map.dispose();
-      obj.material.dispose();
-    }
-  }
-
-  // Clear Depth Labels Group
-  if (depthLabelsGroup) {
-    while (depthLabelsGroup.children.length > 0) {
-      const obj = depthLabelsGroup.children[0];
-      depthLabelsGroup.remove(obj);
-      if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) {
-        if (obj.material.map) obj.material.map.dispose();
-        obj.material.dispose();
-      }
-    }
-  }
-
-  const availableDepths = slicesData
-    .map((s) => s.depth)
-    .filter((d, i, arr) => arr.indexOf(d) === i)
-    .sort((a, b) => a - b);
-
-  let globalMin = Infinity;
-  let globalMax = -Infinity;
-  slicesData.forEach((slice) => {
-    if (!slice.values) return;
-    slice.values.forEach((row) => {
-      row.forEach((v) => {
-        if (v !== null && v !== undefined && !isNaN(v)) {
-          if (v < globalMin) globalMin = v;
-          if (v > globalMax) globalMax = v;
-        }
-      });
-    });
-  });
-
-  if (globalMin === Infinity) {
-    globalMin = 0;
-    globalMax = 1;
-  }
-
-  const effectiveMin = minOverride !== null ? minOverride : globalMin;
-  const effectiveMax = maxOverride !== null ? maxOverride : globalMax;
-
-  // 1. Render REAL Data Slices (All visible simultaneously with depth stack opacities)
-  slicesData.forEach((slice) => {
-    const { depth, values } = slice;
-    if (!values) return;
-
-    const isSelected = depth === activeDepth;
-
-    // Multi-Layer Stack Visibility Rule: Selected slice is high-opacity (0.92), all other real slices are translucent (0.38)
-    let opacity = isSelected ? 0.92 : 0.38;
-    if (renderMode === 'volume') opacity = 0.70;
-
-    const nrows = values.length;
-    const ncols = values[0].length;
-
-    let texture;
-    if (depth === 0) {
-      const surfCanvas = createCoastlineSurfaceCanvas(ncols, nrows, values, effectiveMin, effectiveMax, palette, scaleMode);
-      texture = new THREE.CanvasTexture(surfCanvas);
-    } else {
-      const subCanvas = createSubsurfaceSliceCanvas(ncols, nrows, values, effectiveMin, effectiveMax, palette, scaleMode);
-      texture = new THREE.CanvasTexture(subCanvas);
-    }
-
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-
-    // 12x12 Displaced Wavy Geometry (Prompt F28)
-    const sliceGeo = createDisplacedSliceGeometry(depth, values, effectiveMin, effectiveMax);
-    const borderGeo = createPerimeterBorderGeometry(sliceGeo, 64, 64);
-
-    const material = new THREE.MeshStandardMaterial({
-      map: texture,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: opacity,
-      depthWrite: false,
-      roughness: 0.35,
-      metalness: 0.15,
-    });
-
-    const mesh = new THREE.Mesh(sliceGeo, material);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.visible = true;
-
-    const yPos = DEPTH_Y_MAPPING[depth] ?? (-depth * 0.024);
-    mesh.position.set(0, yPos, 0);
-
-    // Border Outline Loop (Selected = Bright Cyan 0.98 opacity, Other Real Slices = Clean Blue 0.55 opacity)
-    const borderMat = new THREE.LineBasicMaterial({
-      color: isSelected ? 0x00ffff : 0x00aacc,
-      transparent: true,
-      opacity: isSelected ? 0.98 : 0.55,
-    });
-    const borderLine = new THREE.LineLoop(borderGeo, borderMat);
-    mesh.add(borderLine);
-
-    slicesGroup.add(mesh);
-
-    // Leader Line & Depth Label Callout
-    if (depthLabelsGroup) {
-      const lineGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(6.0, yPos, 0.0),
-        new THREE.Vector3(7.4, yPos, 0.0),
-      ]);
-      const lineMat = new THREE.LineBasicMaterial({
-        color: isSelected ? 0x00ffff : 0x00aacc,
-        transparent: true,
-        opacity: isSelected ? 0.95 : 0.55,
-      });
-      depthLabelsGroup.add(new THREE.Line(lineGeo, lineMat));
-
-      const labelText = `${depth}m`;
-      const spriteMat = new THREE.SpriteMaterial({
-        map: createDepthLabelTexture(labelText, isSelected, !isSelected),
-        transparent: true,
-        opacity: isSelected ? 1.0 : 0.75,
-      });
-      const sprite = new THREE.Sprite(spriteMat);
-      sprite.position.set(8.2, yPos, 0.0);
-      sprite.scale.set(1.8, 0.9, 1);
-      depthLabelsGroup.add(sprite);
-    }
-  });
-
-  // 2. Render VERTICAL FILLER SLICES between wide depth gaps (150m, 300m, 400m)
-  const fillerDepths = [150, 300, 400];
-  const fillerTexture = new THREE.CanvasTexture(createFillerSliceCanvas());
-  fillerTexture.minFilter = THREE.LinearFilter;
-
-  fillerDepths.forEach((fDepth) => {
-    const yPos = DEPTH_Y_MAPPING[fDepth];
-    if (yPos === undefined) return;
-
-    // Displaced wavy geometry using F28 organic wave noise (no real data)
-    const fillerGeo = createDisplacedSliceGeometry(fDepth, null, 0, 1);
-    const fillerBorderGeo = createPerimeterBorderGeometry(fillerGeo, 64, 64);
-
-    const fillerMat = new THREE.MeshStandardMaterial({
-      map: fillerTexture,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.18, // Desaturated visual-only context filler
-      depthWrite: false,
-      roughness: 0.45,
-      metalness: 0.10,
-    });
-
-    const fillerMesh = new THREE.Mesh(fillerGeo, fillerMat);
-    fillerMesh.rotation.x = -Math.PI / 2;
-    fillerMesh.position.set(0, yPos, 0);
-
-    const borderMat = new THREE.LineBasicMaterial({
-      color: 0x1a365d,
-      transparent: true,
-      opacity: 0.25,
-    });
-    const borderLine = new THREE.LineLoop(fillerBorderGeo, borderMat);
-    fillerMesh.add(borderLine);
-
-    slicesGroup.add(fillerMesh);
-  });
-}
-
-// 🛠️ Helper: Render Futuristic Glowing Argo Float Buoys
-function rebuildFloatsMesh(floatsGroup, props) {
-  const { floatsData } = props;
-  if (!floatsGroup || !floatsData) return;
-
-  while (floatsGroup.children.length > 0) {
-    const obj = floatsGroup.children[0];
-    floatsGroup.remove(obj);
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) obj.material.dispose();
-  }
-
-  const minLat = 5.0, maxLat = 20.0;
-  const minLon = 75.0, maxLon = 90.0;
-
-  floatsData.forEach((float) => {
-    const { float_id, lat, lon } = float;
-
-    const normX = (lon - minLon) / (maxLon - minLon);
-    const normZ = (lat - minLat) / (maxLat - minLat);
-
-    const sceneX = (normX - 0.5) * 12.0;
-    const sceneZ = -(normZ - 0.5) * 12.0;
-
-    const markerGroup = new THREE.Group();
-    markerGroup.position.set(sceneX, 0, sceneZ);
-    markerGroup.userData = { float_id };
-
-    // 1. Vertical Laser Column to Ocean Floor
-    const laserGeo = new THREE.CylinderGeometry(0.02, 0.02, 14.5, 8);
-    const laserMat = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
-      transparent: true,
-      opacity: 0.5,
-    });
-    const laserMesh = new THREE.Mesh(laserGeo, laserMat);
-    laserMesh.position.y = -7.25;
-    laserMesh.userData = { float_id };
-    markerGroup.add(laserMesh);
-
-    // 2. Floating Ocean Buoy Head
-    const buoyHead = new THREE.Group();
-    buoyHead.position.y = 0.5;
-    buoyHead.userData = { float_id };
-
-    // Central Emissive Orb
-    const orbGeo = new THREE.SphereGeometry(0.32, 24, 24);
-    const orbMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00d2ff,
-      emissiveIntensity: 1.2,
-      roughness: 0.1,
-      metalness: 0.9,
-    });
-    const orbMesh = new THREE.Mesh(orbGeo, orbMat);
-    orbMesh.userData = { float_id };
-    buoyHead.add(orbMesh);
-
-    // Outer Spinning Gold Ring
-    const ringGeo = new THREE.TorusGeometry(0.55, 0.02, 12, 32);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xffb700,
-      transparent: true,
-      opacity: 0.9,
-    });
-    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-    ringMesh.rotation.x = Math.PI / 3;
-    ringMesh.userData = { float_id };
-    buoyHead.add(ringMesh);
-
-    // Pulsing Outer Radar Wave Octahedron
-    const radarGeo = new THREE.OctahedronGeometry(0.7, 0);
-    const radarMat = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.4,
-    });
-    const radarMesh = new THREE.Mesh(radarGeo, radarMat);
-    radarMesh.userData = { float_id };
-    buoyHead.add(radarMesh);
-
-    markerGroup.add(buoyHead);
-    floatsGroup.add(markerGroup);
-  });
 }

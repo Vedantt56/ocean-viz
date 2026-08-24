@@ -1,18 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Compass, ArrowRight, Sparkles } from 'lucide-react';
+import { Compass, ArrowRight, Layers, Navigation, Database } from 'lucide-react';
 
 const EARTH_TEXTURE_URL = "https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/textures/planets/earth_atmos_2048.jpg";
 
-// Demo Region Data
-const DEMO_REGION = {
-  id: 'bay_of_bengal',
-  name: 'Bay of Bengal / EEZ',
-  subtext: 'MoES Operational Ocean Domain',
-  lat: 15.0,
-  lon: 85.0,
-};
+// Domain Regions Metadata Schema (Reusable for multiple domains)
+const DOMAIN_REGIONS = [
+  {
+    id: 'bay_of_bengal',
+    name: 'Bay of Bengal / Indian EEZ',
+    agency: 'MoES / INCOIS',
+    status: 'OPERATIONAL DATASET',
+    lat: 15.0,
+    lon: 85.0,
+    bounds: '6.59°N - 21.00°N | 78.65°E - 92.32°E',
+    variables: ['Temperature', 'Salinity', 'Currents', 'Chlorophyll'],
+    depthLevels: '0m - 500m (Stacked)',
+    description: 'High-resolution ocean hydrodynamic and biogeochemical model fields integrated with real-time Argo float observations.',
+  }
+];
 
 function latLonToVector3(lat, lon, radius) {
   const phi = (90 - lat) * (Math.PI / 180);
@@ -25,31 +32,110 @@ function latLonToVector3(lat, lon, radius) {
   return new THREE.Vector3(x, y, z);
 }
 
+// Generate realistic NASA-style Earth texture canvas fallback
 function createProceduralEarthCanvas() {
   const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 512;
+  canvas.width = 2048;
+  canvas.height = 1024;
   const ctx = canvas.getContext('2d');
 
+  // Deep Ocean Blue Base
   ctx.fillStyle = '#061329';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  ctx.fillStyle = '#1B382B';
+  // Ocean Bathymetry Depth Gradients
+  const oceanGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  oceanGrad.addColorStop(0, '#040d1e');
+  oceanGrad.addColorStop(0.3, '#091f3d');
+  oceanGrad.addColorStop(0.7, '#071830');
+  oceanGrad.addColorStop(1, '#030a17');
+  ctx.fillStyle = oceanGrad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Continents (Realistic Landmass Silhouettes - India, Asia, Africa, Australia)
+  ctx.fillStyle = '#1e3023'; // Realistic vegetation land green/brown
+  ctx.strokeStyle = '#2d4734';
+  ctx.lineWidth = 2;
+
+  // Indian Subcontinent & Bay of Bengal (Centered on Lon 85E -> X ~1500)
   ctx.beginPath();
-  ctx.ellipse(750, 180, 160, 100, 0, 0, Math.PI * 2);
-  ctx.ellipse(560, 260, 90, 120, 0, 0, Math.PI * 2);
-  ctx.ellipse(260, 220, 80, 140, -0.2, 0, Math.PI * 2);
-  ctx.ellipse(820, 360, 70, 50, 0, 0, Math.PI * 2);
+  ctx.ellipse(1500, 420, 240, 180, 0.2, 0, Math.PI * 2); // Asia landmass
+  ctx.ellipse(1460, 520, 140, 120, -0.3, 0, Math.PI * 2); // Indian Peninsula
+  ctx.ellipse(1720, 680, 110, 80, 0.4, 0, Math.PI * 2); // SE Asia & Indonesia
+  ctx.ellipse(650, 480, 180, 220, -0.1, 0, Math.PI * 2); // Africa
+  ctx.ellipse(1820, 780, 140, 100, 0, 0, Math.PI * 2); // Australia
   ctx.fill();
 
-  ctx.strokeStyle = '#00D2FF';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#00d2ff';
+  ctx.lineWidth = 1.0;
   ctx.stroke();
 
   return canvas;
 }
 
-export default function GlobeView({ onSelectRegion }) {
+// Generate realistic geographic map thumbnail for domain card visual anchor
+function createDomainThumbnailDataUrl() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 400;
+  canvas.height = 180;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#061329';
+  ctx.fillRect(0, 0, 400, 180);
+
+  const oceanGrad = ctx.createRadialGradient(250, 90, 10, 250, 90, 160);
+  oceanGrad.addColorStop(0, '#0c284e');
+  oceanGrad.addColorStop(0.6, '#081b36');
+  oceanGrad.addColorStop(1, '#040f22');
+  ctx.fillStyle = oceanGrad;
+  ctx.fillRect(0, 0, 400, 180);
+
+  // Satellite Land Mass (India Peninsula & Bay of Bengal coast)
+  ctx.fillStyle = '#18291d';
+  ctx.strokeStyle = '#2c4533';
+  ctx.lineWidth = 1.5;
+
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(150, 0);
+  ctx.bezierCurveTo(130, 45, 100, 80, 70, 120);
+  ctx.bezierCurveTo(50, 150, 30, 170, 0, 180);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(330, 0);
+  ctx.lineTo(400, 0);
+  ctx.lineTo(400, 180);
+  ctx.lineTo(350, 180);
+  ctx.bezierCurveTo(330, 120, 310, 70, 330, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Bounding box outline for EEZ domain
+  ctx.strokeStyle = 'rgba(0, 210, 255, 0.7)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+  ctx.strokeRect(85, 25, 210, 130);
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = '#00d2ff';
+  ctx.fillRect(83, 23, 5, 5);
+  ctx.fillRect(293, 23, 5, 5);
+  ctx.fillRect(83, 153, 5, 5);
+  ctx.fillRect(293, 153, 5, 5);
+
+  // Label inside thumbnail
+  ctx.fillStyle = 'rgba(0, 210, 255, 0.9)';
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('BAY OF BENGAL EEZ BOUNDS', 95, 45);
+
+  return canvas.toDataURL();
+}
+
+export default function GlobeView({ onSelectRegion, floatsCount = 0 }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
@@ -57,20 +143,20 @@ export default function GlobeView({ onSelectRegion }) {
   const globeMeshRef = useRef(null);
   const markerGroupRef = useRef(null);
   const markerAnchorRef = useRef(null);
-  const crystalMeshRef = useRef(null);
-  const innerTorusMeshRef = useRef(null);
-  const outerTorusMeshRef = useRef(null);
-  const outerRingMeshRef = useRef(null);
-  const rippleMeshRef = useRef(null);
   const controlsRef = useRef(null);
 
-  const [hoveredRegion, setHoveredRegion] = useState(null);
   const [screenPos, setScreenPos] = useState({ x: -1000, y: -1000, visible: false });
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [activeDomainTile] = useState(DOMAIN_REGIONS[0]);
+  const [thumbnailUrl, setThumbnailUrl] = useState('');
 
   const isInteractingRef = useRef(false);
   const interactTimeoutRef = useRef(null);
   const isZoomingToRegionRef = useRef(false);
+
+  useEffect(() => {
+    setThumbnailUrl(createDomainThumbnailDataUrl());
+  }, []);
 
   useEffect(() => {
     const container = mountRef.current;
@@ -80,25 +166,27 @@ export default function GlobeView({ onSelectRegion }) {
     const height = container.clientHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x040812);
+    scene.background = new THREE.Color(0x030712);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(0, 4, 14);
+    const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 1000);
+    camera.position.set(0, 2.5, 14.0); // Dominant realistic earth perspective
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
     rendererRef.current = renderer;
     container.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.rotateSpeed = 0.8;
-    controls.minDistance = 6;
-    controls.maxDistance = 25;
+    controls.rotateSpeed = 0.7;
+    controls.minDistance = 6.5;
+    controls.maxDistance = 20;
     controlsRef.current = controls;
 
     const handleStartInteraction = () => {
@@ -116,210 +204,149 @@ export default function GlobeView({ onSelectRegion }) {
     controls.addEventListener('start', handleStartInteraction);
     controls.addEventListener('end', handleEndInteraction);
 
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+    // Realistic Sun & Atmospheric Lighting Setup
+    const ambientLight = new THREE.AmbientLight(0xd4e8ff, 0.45); // Dark space ambient
     scene.add(ambientLight);
 
-    const sunLight = new THREE.DirectionalLight(0xffffff, 1.25);
-    sunLight.position.set(15, 12, 15);
+    // Realistic Directional Sun Light creating Day/Night Terminator
+    const sunLight = new THREE.DirectionalLight(0xffffff, 1.8);
+    sunLight.position.set(22, 10, 18);
     scene.add(sunLight);
 
-    // Starfield Background
+    // Soft Rim Light from deep space
+    const rimLight = new THREE.DirectionalLight(0x00d2ff, 0.4);
+    rimLight.position.set(-20, -10, -15);
+    scene.add(rimLight);
+
+    // Starfield Points
     const starsGeo = new THREE.BufferGeometry();
-    const starCount = 1200;
+    const starCount = 1600;
     const starPositions = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount * 3; i += 3) {
-      starPositions[i] = (Math.random() - 0.5) * 180;
-      starPositions[i + 1] = (Math.random() - 0.5) * 180;
-      starPositions[i + 2] = (Math.random() - 0.5) * 180;
+      starPositions[i] = (Math.random() - 0.5) * 200;
+      starPositions[i + 1] = (Math.random() - 0.5) * 200;
+      starPositions[i + 2] = (Math.random() - 0.5) * 200;
     }
     starsGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-    const starsMat = new THREE.PointsMaterial({ color: 0x88ccee, size: 0.6, transparent: true, opacity: 0.7 });
+    const starsMat = new THREE.PointsMaterial({ color: 0x7dd3fc, size: 0.5, transparent: true, opacity: 0.5 });
     const starField = new THREE.Points(starsGeo, starsMat);
     scene.add(starField);
 
-    // 3D Globe Mesh
+    // 3D Realistic Earth Sphere
     const sphereGeo = new THREE.SphereGeometry(5, 64, 64);
     const textureLoader = new THREE.TextureLoader();
-    const globeMat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.1 });
+    const globeMat = new THREE.MeshStandardMaterial({
+      roughness: 0.65,
+      metalness: 0.1,
+    });
 
     textureLoader.load(
       EARTH_TEXTURE_URL,
       (texture) => {
+        texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
         globeMat.map = texture;
         globeMat.needsUpdate = true;
       },
       undefined,
       () => {
         const fallbackCanvas = createProceduralEarthCanvas();
-        globeMat.map = new THREE.CanvasTexture(fallbackCanvas);
+        const texture = new THREE.CanvasTexture(fallbackCanvas);
+        texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        globeMat.map = texture;
         globeMat.needsUpdate = true;
       }
     );
 
     const globeMesh = new THREE.Mesh(sphereGeo, globeMat);
+    // Rotate globe initially so Indian Ocean & Bay of Bengal are perfectly centered!
+    globeMesh.rotation.y = -Math.PI / 2.8;
     scene.add(globeMesh);
     globeMeshRef.current = globeMesh;
 
-    // Atmospheric Outer Glow
-    const atmosGeo = new THREE.SphereGeometry(5.12, 64, 64);
+    // Subtle Blue Atmospheric Rim Shell
+    const atmosGeo = new THREE.SphereGeometry(5.08, 64, 64);
     const atmosMat = new THREE.MeshBasicMaterial({
       color: 0x00d2ff,
       side: THREE.BackSide,
       transparent: true,
-      opacity: 0.18,
+      opacity: 0.14,
     });
     const atmosMesh = new THREE.Mesh(atmosGeo, atmosMat);
     scene.add(atmosMesh);
 
-    // Classy Region Holographic Beacon Marker
+    // Minimal Scientific Region Indicator Marker (Geographically Anchored to Bay of Bengal 15N, 85E)
     const markerGroup = new THREE.Group();
+    markerGroup.rotation.y = -Math.PI / 2.8;
     scene.add(markerGroup);
     markerGroupRef.current = markerGroup;
 
     const globeRadius = 5.0;
-    const markerPos = latLonToVector3(DEMO_REGION.lat, DEMO_REGION.lon, globeRadius);
+    const domain = DOMAIN_REGIONS[0];
+    const markerPos = latLonToVector3(domain.lat, domain.lon, globeRadius);
     const surfaceNormal = markerPos.clone().normalize();
 
-    // Anchor Object for the region marker
     const markerAnchor = new THREE.Group();
     markerAnchor.position.copy(markerPos);
     
-    // Orient marker perpendicularly to the sphere surface
     const upVector = new THREE.Vector3(0, 1, 0);
     markerAnchor.quaternion.setFromUnitVectors(upVector, surfaceNormal);
-    markerAnchor.userData = { regionId: DEMO_REGION.id };
+    markerAnchor.userData = { regionId: domain.id };
     markerAnchorRef.current = markerAnchor;
 
-    // 1. Surface Radar Target Base Ring (Inner Solid Ring)
-    const innerRingGeo = new THREE.RingGeometry(0.12, 0.22, 32);
-    const innerRingMat = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.9,
-    });
-    const innerRingMesh = new THREE.Mesh(innerRingGeo, innerRingMat);
-    innerRingMesh.rotation.x = Math.PI / 2; // Flat on surface
-    innerRingMesh.userData = { regionId: DEMO_REGION.id };
-    markerAnchor.add(innerRingMesh);
+    // 1. Small cyan circular point sitting exactly on Earth surface
+    const pointGeo = new THREE.SphereGeometry(0.08, 20, 20);
+    const pointMat = new THREE.MeshBasicMaterial({ color: 0x00d2ff });
+    const pointMesh = new THREE.Mesh(pointGeo, pointMat);
+    pointMesh.userData = { regionId: domain.id };
+    markerAnchor.add(pointMesh);
 
-    // 2. Outer Rotating Radar Ring (Dashed Outer Ring)
-    const outerRingGeo = new THREE.RingGeometry(0.42, 0.48, 32);
-    const outerRingMat = new THREE.MeshBasicMaterial({
+    // 2. Subtle thin selection ring
+    const ringGeo = new THREE.RingGeometry(0.1, 0.16, 32);
+    const ringMat = new THREE.MeshBasicMaterial({
       color: 0x00d2ff,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.75,
-      wireframe: true,
-    });
-    const outerRingMesh = new THREE.Mesh(outerRingGeo, outerRingMat);
-    outerRingMesh.rotation.x = Math.PI / 2;
-    outerRingMesh.userData = { regionId: DEMO_REGION.id };
-    markerAnchor.add(outerRingMesh);
-    outerRingMeshRef.current = outerRingMesh;
-
-    // 3. Expanding Sonar Ripple Wave Ring
-    const rippleGeo = new THREE.RingGeometry(0.1, 0.16, 32);
-    const rippleMat = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.8,
     });
-    const rippleMesh = new THREE.Mesh(rippleGeo, rippleMat);
-    rippleMesh.rotation.x = Math.PI / 2;
-    rippleMesh.userData = { regionId: DEMO_REGION.id };
-    markerAnchor.add(rippleMesh);
-    rippleMeshRef.current = rippleMesh;
+    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+    ringMesh.rotation.x = Math.PI / 2;
+    ringMesh.userData = { regionId: domain.id };
+    markerAnchor.add(ringMesh);
 
-    // 4. Slender Precision Laser Needle Stem
-    const beamGeo = new THREE.CylinderGeometry(0.008, 0.035, 1.2, 16);
-    const beamMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 1.0,
+    // 3. Faint outer expanding pulse ring
+    const outerRingGeo = new THREE.RingGeometry(0.18, 0.22, 32);
+    const outerRingMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.75,
-      roughness: 0.05,
+      opacity: 0.4,
     });
-    const beamMesh = new THREE.Mesh(beamGeo, beamMat);
-    beamMesh.position.y = 0.6;
-    beamMesh.userData = { regionId: DEMO_REGION.id };
-    markerAnchor.add(beamMesh);
+    const outerRingMesh = new THREE.Mesh(outerRingGeo, outerRingMat);
+    outerRingMesh.rotation.x = Math.PI / 2;
+    outerRingMesh.userData = { regionId: domain.id };
+    markerAnchor.add(outerRingMesh);
 
-    // 5. Ultra-Classy Dual-Ring Gyro Beacon Head
-    const headGroup = new THREE.Group();
-    headGroup.position.y = 1.2;
-    headGroup.userData = { regionId: DEMO_REGION.id };
-
-    // Core Pearl Micro Sphere Head
-    const orbGeo = new THREE.SphereGeometry(0.10, 24, 24);
-    const orbMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 1.2,
-      roughness: 0.1,
-      metalness: 0.9,
-    });
-    const orbMesh = new THREE.Mesh(orbGeo, orbMat);
-    orbMesh.userData = { regionId: DEMO_REGION.id };
-    headGroup.add(orbMesh);
-
-    // Outer Translucent Aura Shell
-    const auraGeo = new THREE.SphereGeometry(0.17, 16, 16);
-    const auraMat = new THREE.MeshBasicMaterial({
-      color: 0x00d2ff,
-      transparent: true,
-      opacity: 0.35,
-      wireframe: true,
-    });
-    const auraMesh = new THREE.Mesh(auraGeo, auraMat);
-    auraMesh.userData = { regionId: DEMO_REGION.id };
-    headGroup.add(auraMesh);
-
-    // Inner Gyro Orbital Ring (Cyan)
-    const innerTorusGeo = new THREE.TorusGeometry(0.24, 0.012, 12, 32);
-    const innerTorusMat = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
-      transparent: true,
-      opacity: 0.95,
-    });
-    const innerTorusMesh = new THREE.Mesh(innerTorusGeo, innerTorusMat);
-    innerTorusMesh.rotation.x = Math.PI / 4;
-    innerTorusMesh.userData = { regionId: DEMO_REGION.id };
-    headGroup.add(innerTorusMesh);
-    innerTorusMeshRef.current = innerTorusMesh;
-
-    // Outer Gyro Orbital Ring (Gold/Amber Counter-Rotating)
-    const outerTorusGeo = new THREE.TorusGeometry(0.32, 0.010, 12, 32);
-    const outerTorusMat = new THREE.MeshBasicMaterial({
-      color: 0xffb700,
-      transparent: true,
-      opacity: 0.85,
-    });
-    const outerTorusMesh = new THREE.Mesh(outerTorusGeo, outerTorusMat);
-    outerTorusMesh.rotation.x = -Math.PI / 4;
-    outerTorusMesh.userData = { regionId: DEMO_REGION.id };
-    headGroup.add(outerTorusMesh);
-    outerTorusMeshRef.current = outerTorusMesh;
-
-    markerAnchor.add(headGroup);
-    crystalMeshRef.current = headGroup;
+    // 4. Thin Leader Line connecting surface point to label
+    const leaderLineGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.6, 8);
+    const leaderLineMat = new THREE.MeshBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.75 });
+    const leaderLineMesh = new THREE.Mesh(leaderLineGeo, leaderLineMat);
+    leaderLineMesh.position.y = 0.3;
+    leaderLineMesh.userData = { regionId: domain.id };
+    markerAnchor.add(leaderLineMesh);
 
     markerGroup.add(markerAnchor);
 
-    // Raycasting Setup
+    // Raycaster
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    const startRegionTransition = () => {
+    const startRegionTransition = (regionId) => {
       if (isZoomingToRegionRef.current) return;
       isZoomingToRegionRef.current = true;
       setIsTransitioning(true);
 
       setTimeout(() => {
-        if (onSelectRegion) onSelectRegion(DEMO_REGION.id);
+        if (onSelectRegion) onSelectRegion(regionId || domain.id);
       }, 950);
     };
 
@@ -333,7 +360,7 @@ export default function GlobeView({ onSelectRegion }) {
       const intersects = raycaster.intersectObjects(markerGroupRef.current.children, true);
 
       if (intersects.length > 0) {
-        startRegionTransition();
+        startRegionTransition(domain.id);
       }
     };
 
@@ -348,10 +375,8 @@ export default function GlobeView({ onSelectRegion }) {
 
       if (intersects.length > 0) {
         rendererRef.current.domElement.style.cursor = 'pointer';
-        setHoveredRegion(DEMO_REGION);
       } else {
         rendererRef.current.domElement.style.cursor = 'grab';
-        setHoveredRegion(null);
       }
     };
 
@@ -365,51 +390,34 @@ export default function GlobeView({ onSelectRegion }) {
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
-      animTime += 0.03;
+      animTime += 0.02;
 
-      // Camera Lerp Zoom to Region on click
       if (isZoomingToRegionRef.current && markerAnchorRef.current && cameraRef.current && controlsRef.current) {
         const markerWorldPos = new THREE.Vector3();
         markerAnchorRef.current.getWorldPosition(markerWorldPos);
 
-        const targetCamPos = markerWorldPos.clone().multiplyScalar(1.38);
+        const targetCamPos = markerWorldPos.clone().multiplyScalar(1.35);
         cameraRef.current.position.lerp(targetCamPos, 0.08);
         controlsRef.current.target.lerp(markerWorldPos, 0.08);
       } else {
         controls.update();
 
-        // Slow ambient globe auto-rotation when idle
+        // Very subtle ambient earth rotation when idle
         if (!isInteractingRef.current && globeMeshRef.current) {
-          globeMeshRef.current.rotation.y += 0.0012;
-          markerGroupRef.current.rotation.y += 0.0012;
+          globeMeshRef.current.rotation.y += 0.0006;
+          markerGroupRef.current.rotation.y += 0.0006;
         }
       }
 
-      // Classy Marker Animations:
-      // 1. Gentle floating levitation bobbing motion
-      if (crystalMeshRef.current) {
-        crystalMeshRef.current.position.y = 1.2 + Math.sin(animTime * 2.2) * 0.05;
+      // Gentle, slow ring pulse (expands & fades, no spinning)
+      if (outerRingMesh) {
+        const scaleVal = 1.0 + Math.sin(animTime * 1.5) * 0.25;
+        const opacityVal = 0.4 - Math.sin(animTime * 1.5) * 0.2;
+        outerRingMesh.scale.set(scaleVal, scaleVal, scaleVal);
+        outerRingMesh.material.opacity = Math.max(0.05, opacityVal);
       }
 
-      // 2. Counter-rotating Dual Gyro Rings
-      if (innerTorusMeshRef.current) {
-        innerTorusMeshRef.current.rotation.z += 0.025;
-        innerTorusMeshRef.current.rotation.y += 0.015;
-      }
-      if (outerTorusMeshRef.current) {
-        outerTorusMeshRef.current.rotation.z -= 0.03;
-        outerTorusMeshRef.current.rotation.x += 0.015;
-      }
-
-      // 3. Expanding Sonar Wave Ripple
-      if (rippleMeshRef.current) {
-        const rippleScale = 1.0 + ((animTime * 1.5) % 3.0);
-        const rippleOpacity = Math.max(0, 1.0 - rippleScale / 4.0);
-        rippleMeshRef.current.scale.set(rippleScale, rippleScale, rippleScale);
-        rippleMeshRef.current.material.opacity = rippleOpacity;
-      }
-
-      // 2D Screen Projection for HTML Hover Badge
+      // 2D Screen Projection for Geographic Marker Label
       if (cameraRef.current && markerAnchor) {
         const worldPos = new THREE.Vector3();
         markerAnchor.getWorldPosition(worldPos);
@@ -456,84 +464,153 @@ export default function GlobeView({ onSelectRegion }) {
     };
   }, [onSelectRegion]);
 
-  const handleManualSelect = () => {
+  const handleEnterDomain = (regionId) => {
     if (isZoomingToRegionRef.current) return;
     isZoomingToRegionRef.current = true;
     setIsTransitioning(true);
 
     setTimeout(() => {
-      if (onSelectRegion) onSelectRegion(DEMO_REGION.id);
+      if (onSelectRegion) onSelectRegion(regionId);
     }, 950);
   };
 
   return (
-    <div className="relative w-screen h-screen bg-ocean-dark overflow-hidden select-none">
-      {/* Fade Crossfade Overlay */}
+    <div className="relative w-screen h-screen bg-ocean-deep overflow-hidden select-none font-sans">
+      {/* Screen Transition Overlay */}
       <div
-        className={`absolute inset-0 bg-slate-950 z-40 transition-opacity duration-700 pointer-events-none ${
+        className={`absolute inset-0 bg-ocean-deep z-50 transition-opacity duration-700 pointer-events-none ${
           isTransitioning ? 'opacity-100' : 'opacity-0'
         }`}
       />
 
-      {/* 3D Three.js Canvas Container */}
+      {/* 3D Three.js Globe Viewport */}
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
       {/* Top Header Badge */}
-      <div className="absolute top-6 left-6 z-10 flex items-center gap-3 bg-ocean-panel/85 backdrop-blur-md border border-ocean-border/80 px-4 py-2.5 rounded-xl shadow-2xl">
-        <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
+      <div className="absolute top-6 left-6 z-10 flex items-center gap-3.5 glass-panel px-4 py-2.5 rounded-2xl shadow-glass border border-ocean-border">
+        <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-cyan-glow" />
         <div>
-          <h1 className="text-sm font-bold text-white tracking-wider uppercase">
-            Global Ocean 3D Platform
+          <h1 className="text-xs font-bold font-mono tracking-widest text-white uppercase">
+            PS 26067 OCEAN 3D PLATFORM
           </h1>
-          <p className="text-[11px] text-slate-400 font-mono">SIH PS 26067 • MoES / INCOIS</p>
+          <p className="text-[10px] text-slate-400 font-mono tracking-tight">
+            MoES / INCOIS Operational Domain
+          </p>
         </div>
       </div>
 
       {/* Top Right Navigation Hint */}
-      <div className="absolute top-6 right-6 z-10 bg-ocean-panel/80 backdrop-blur-md border border-ocean-border px-3.5 py-2 rounded-xl text-xs font-mono text-cyan-300 shadow-lg flex items-center gap-2">
-        <Compass className="w-4 h-4 text-cyan-400 animate-spin-slow" />
-        <span>Rotate Globe • Click Holographic Marker to Explore</span>
+      <div className="absolute top-6 right-6 z-10 glass-panel px-4 py-2.5 rounded-2xl text-xs font-mono text-cyan-300 shadow-glass flex items-center gap-2 border border-ocean-border">
+        <Compass className="w-4 h-4 text-cyan-400" />
+        <span>Rotate Globe • Click Marker to Explore</span>
       </div>
 
-      {/* Classy HTML Hover Badge Overlay (Tracks 3D Holographic Marker) */}
+      {/* Precise Geographic Marker Attached Label (Compact Scientific Tag) */}
       {screenPos.visible && (
         <div
           style={{
             left: `${screenPos.x}px`,
-            top: `${screenPos.y - 75}px`,
+            top: `${screenPos.y - 45}px`,
             transform: 'translate(-50%, -100%)',
           }}
-          className={`absolute pointer-events-none transition-all duration-200 z-20 ${
-            hoveredRegion ? 'opacity-100 scale-105' : 'opacity-90'
-          }`}
+          className="absolute z-20 cursor-pointer transition-transform duration-200 hover:scale-105"
+          onClick={() => handleEnterDomain(activeDomainTile.id)}
         >
-          <div className="bg-ocean-panel/95 backdrop-blur-xl border border-cyan-400/70 px-4 py-2.5 rounded-2xl shadow-2xl shadow-cyan-950/80 flex items-center gap-3 text-left">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center text-slate-950 shadow-md">
-              <Sparkles className="w-4.5 h-4.5 animate-pulse" />
+          <div className="bg-ocean-deep/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-cyan-400/60 shadow-2xl flex items-center gap-2.5">
+            <div className="w-5 h-5 rounded-lg bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center text-cyan-300">
+              <Navigation className="w-3 h-3" />
             </div>
-            <div>
-              <div className="text-xs font-bold text-white tracking-wide font-sans flex items-center gap-1.5 uppercase">
-                {DEMO_REGION.name}
-                <ArrowRight className="w-3.5 h-3.5 text-cyan-400" />
+            <div className="text-left">
+              <div className="text-[11px] font-bold text-white font-mono tracking-wider flex items-center gap-1 uppercase">
+                {activeDomainTile.name}
+                <ArrowRight className="w-3 h-3 text-cyan-400" />
               </div>
-              <p className="text-[10px] text-cyan-300 font-mono">{DEMO_REGION.subtext}</p>
+              <p className="text-[9px] text-slate-400 font-mono">{activeDomainTile.agency}</p>
             </div>
           </div>
-          <div className="w-3 h-3 bg-ocean-panel border-r border-b border-cyan-400/70 rotate-45 mx-auto -mt-1.5 shadow-sm" />
+          <div className="w-2 h-2 bg-ocean-deep border-r border-b border-cyan-400/60 rotate-45 mx-auto -mt-1" />
         </div>
       )}
 
-      {/* Bottom Floating Call-to-Action Button */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10">
-        <button
-          onClick={handleManualSelect}
-          className="px-6 py-3 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-sm flex items-center gap-2.5 shadow-2xl shadow-cyan-500/30 hover:scale-105 transition-all duration-200"
-        >
-          <Sparkles className="w-4 h-4" />
-          Enter Bay of Bengal Domain (3D Depth Slices)
-          <ArrowRight className="w-4 h-4" />
-        </button>
+      {/* Media-First Oceanographic Dataset Preview Card (Completely Redesigned Composition) */}
+      <div className="absolute bottom-8 right-8 z-20 w-96 bg-[#09152b]/95 backdrop-blur-xl rounded-2xl border border-slate-700/60 shadow-2xl overflow-hidden flex flex-col hover:-translate-y-1 transition-all duration-300 group">
+        {/* Top 50% Real Geographic Preview Header */}
+        <div className="relative h-48 w-full bg-ocean-deep overflow-hidden">
+          {thumbnailUrl && (
+            <img
+              src={thumbnailUrl}
+              alt="Bay of Bengal Oceanographic Domain Map"
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-90"
+            />
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-[#09152b] via-[#09152b]/40 to-transparent" />
+          
+          <div className="absolute top-3 left-3">
+            <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 font-bold uppercase tracking-wider">
+              OPERATIONAL DATASET
+            </span>
+          </div>
+
+          <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-slate-900/80 border border-slate-700/60 px-2 py-0.5 rounded text-[9px] font-mono text-emerald-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            LIVE FEED
+          </div>
+        </div>
+
+        {/* Bottom 50% Dataset Details (Simple Typography, No Dashboard Box Overload) */}
+        <div className="p-5 pt-2 flex flex-col">
+          {/* Title & Agency */}
+          <div>
+            <h2 className="text-lg font-bold text-white tracking-wide font-sans">
+              BAY OF BENGAL
+            </h2>
+            <p className="text-xs text-slate-400 font-sans mt-0.5">
+              Indian EEZ • MoES / INCOIS
+            </p>
+          </div>
+
+          {/* Description */}
+          <p className="text-xs text-slate-300 leading-relaxed font-sans mt-2 text-left">
+            Hydrodynamic & Biogeochemical Ocean Model Field
+          </p>
+
+          {/* Compact Scientific Metadata Lines */}
+          <div className="mt-3.5 flex flex-col gap-1 text-[11px] font-mono text-slate-400 text-left">
+            <div className="text-slate-300">
+              6.59°N – 21.00°N • 78.65°E – 92.32°E
+            </div>
+            <div className="text-cyan-300 font-medium flex items-center gap-3 mt-0.5">
+              <span>• 4 ARGO FLOATS</span>
+              <span>• 4 VARIABLES</span>
+            </div>
+          </div>
+
+          {/* Available Variables Text Line */}
+          <div className="text-[10px] font-mono text-slate-400 mt-2.5 text-left">
+            <span className="text-slate-500">VARIABLES:</span> Temperature · Salinity · Currents · Chlorophyll
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-slate-700/60 my-4" />
+
+          {/* Primary Action Button */}
+          <button
+            onClick={() => handleEnterDomain(activeDomainTile.id)}
+            className="w-full py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs font-mono uppercase tracking-wider flex items-center justify-between px-4 shadow-lg shadow-cyan-500/20 transition-all duration-200 group-hover:bg-cyan-400"
+          >
+            <span>EXPLORE 3D DOMAIN</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Bottom Left Badge */}
+      <div className="absolute bottom-8 left-8 z-10 hidden md:flex items-center gap-2.5 glass-panel-subtle px-4 py-2.5 rounded-2xl border border-ocean-border text-xs text-slate-400 font-mono">
+        <Database className="w-4 h-4 text-cyan-400 shrink-0" />
+        <span>High Resolution Earth Rendering</span>
       </div>
     </div>
   );
 }
+
+
