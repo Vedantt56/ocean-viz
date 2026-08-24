@@ -10,6 +10,9 @@ const TILE_THICKNESS = 0.28;
 const DEFAULT_LON_RANGE = [75, 90];
 const DEFAULT_LAT_RANGE = [5, 20];
 
+let activeHoveredFloatId = null;
+
+
 const VARIABLE_UNITS = {
   temperature: 'deg C',
   salinity: 'PSU',
@@ -158,20 +161,23 @@ function createRealTileGroup(slice, props, effectiveRange) {
   const sortedDepths = [...availableDepths].sort((a, b) => a - b);
   const maxDepth = Math.max(...sortedDepths, 1);
   const depthT = Math.max(0, Math.min(1, slice.depth / maxDepth));
-  const isSelected = slice.depth === activeDepth;
-  const activeIndex = Math.max(0, sortedDepths.indexOf(activeDepth));
-  const sliceIndex = Math.max(0, sortedDepths.indexOf(slice.depth));
+  const numericActiveDepth = Number(activeDepth);
+  const sliceDepth = Number(slice.depth);
+  const isSelected = sliceDepth === numericActiveDepth;
+  const activeIndex = Math.max(0, sortedDepths.indexOf(numericActiveDepth));
+  const sliceIndex = Math.max(0, sortedDepths.indexOf(sliceDepth));
   const indexDistance = Math.abs(sliceIndex - activeIndex);
-  const range = effectiveRange.max - effectiveRange.min || 1;
-  const baseOpacity = sliceOpacity ?? 0.9;
-  // Stacked Slices mode: keep every tile clearly visible; only a mild lift for the active one
-  const sliceStrengths = [1.0, 0.30, 0.16, 0.10, 0.07];
-  // Volumetric mode: intentionally more see-through so you can peer through the stack
-  const volumeStrengths = [0.92, 0.42, 0.26, 0.18, 0.13];
+
+  const range = (effectiveRange.max - effectiveRange.min) || 1;
+  const baseOpacity = sliceOpacity ?? 0.95;
+
+  // Active slice (indexDistance === 0) is 1.0 (100% vibrant & opaque); inactive slices are ghosted (10% - 28%)
+  const sliceStrengths = [1.0, 0.28, 0.18, 0.12, 0.08];
+  const volumeStrengths = [1.0, 0.38, 0.24, 0.16, 0.11];
   const focus = renderMode === 'volume'
     ? volumeStrengths[Math.min(indexDistance, volumeStrengths.length - 1)]
     : sliceStrengths[Math.min(indexDistance, sliceStrengths.length - 1)];
-  const layerOpacity = baseOpacity * focus;
+  const layerOpacity = isSelected ? 1.0 : baseOpacity * focus;
 
   let ptr = 0;
   for (let iz = 0; iz <= segmentsZ; iz += 1) {
@@ -203,6 +209,7 @@ function createRealTileGroup(slice, props, effectiveRange) {
     }
   }
 
+
   for (let iz = 0; iz < segmentsZ; iz += 1) {
     for (let ix = 0; ix < segmentsX; ix += 1) {
       const a = iz * (segmentsX + 1) + ix;
@@ -228,6 +235,7 @@ function createRealTileGroup(slice, props, effectiveRange) {
     uniforms: {
       uDepthTint: { value: depthT },
       uSelectedBoost: { value: isSelected ? 0.20 : 0.0 },
+      uEmissiveBoost: { value: renderMode === 'volume' ? 0.52 : 0.0 },
       uLayerOpacity: { value: layerOpacity },
       uLightDirection: { value: new THREE.Vector3(-0.35, 0.82, 0.45).normalize() },
     },
@@ -249,6 +257,7 @@ function createRealTileGroup(slice, props, effectiveRange) {
     fragmentShader: `
       uniform float uDepthTint;
       uniform float uSelectedBoost;
+      uniform float uEmissiveBoost;
       uniform float uLayerOpacity;
       uniform vec3 uLightDirection;
       varying vec3 vColor;
@@ -266,13 +275,18 @@ function createRealTileGroup(slice, props, effectiveRange) {
         float diffuse = 0.82 + frontDiffuse * 0.28 + backDiffuse * 0.15;
         float specular = pow(max(dot(normal, halfVector), 0.0), 32.0) * 0.18 * (1.0 - uDepthTint * 0.4);
 
-        vec3 shaded = vColor * diffuse + vec3(specular) + uSelectedBoost * vec3(0.20, 0.22, 0.28);
+        // Self-luminous data color emission (Glow) for vibrant 3D volumetric stacking
+        vec3 emissiveGlow = vColor * uEmissiveBoost;
+
+        vec3 shaded = vColor * diffuse + vec3(specular) + emissiveGlow + uSelectedBoost * vec3(0.20, 0.22, 0.28);
         gl_FragColor = vec4(shaded, vAlpha * uLayerOpacity);
       }
     `,
     vertexColors: true,
-    blending: THREE.NormalBlending,
+    blending: renderMode === 'volume' ? THREE.AdditiveBlending : THREE.NormalBlending,
   });
+
+
 
   const topMesh = new THREE.Mesh(topGeometry, topMaterial);
 
@@ -444,25 +458,28 @@ function createRealTileGroup(slice, props, effectiveRange) {
 
 function animateTileTransitions(sliceTilesMap, depthGuidesGroup, props) {
   const { activeDepth, availableDepths, verticalExaggeration, renderMode, sliceOpacity } = props;
-  const sortedDepths = [...availableDepths].sort((a, b) => a - b);
-  const activeIndex = Math.max(0, sortedDepths.indexOf(activeDepth));
+  const numericActiveDepth = Number(activeDepth);
   const baseOpacity = sliceOpacity ?? 0.92;
-  const sliceStrengths = [1.0, 0.30, 0.16, 0.10, 0.07];
-  const volumeStrengths = [0.92, 0.42, 0.26, 0.18, 0.13];
+  const isVolumetric = renderMode === 'volume';
 
-  sliceTilesMap.forEach((tileGroup, depth) => {
-    const sliceIndex = Math.max(0, sortedDepths.indexOf(depth));
-    const indexDistance = Math.abs(sliceIndex - activeIndex);
-    const isSelected = depth === activeDepth;
+  sliceTilesMap.forEach((tileGroup, depthKey) => {
+    const depth = Number(depthKey);
+    const isSelected = depth === numericActiveDepth;
     const depthY = getDepthYPosition(depth, availableDepths, verticalExaggeration);
 
-    const targetY = isSelected ? depthY + 0.22 : depthY;
-    const focus = renderMode === 'volume'
-      ? volumeStrengths[Math.min(indexDistance, volumeStrengths.length - 1)]
-      : sliceStrengths[Math.min(indexDistance, sliceStrengths.length - 1)];
-    const targetOpacity = baseOpacity * focus;
-    const targetBoost = isSelected ? 0.24 : 0.0;
-    const targetScale = isSelected ? 1.015 : 1.0;
+    tileGroup.visible = true;
+
+    // In Stacked Slices mode, active slice elevates +0.22. In Volumetric Stack mode, all slices align to uniform depth elevation.
+    const targetY = (isSelected && !isVolumetric) ? depthY + 0.22 : depthY;
+
+    // 1 & 2. Slightly bumped opacity (0.28) and self-emissive glow (0.52) in Volumetric Stack mode
+    const targetOpacity = isVolumetric
+      ? 0.28 * baseOpacity
+      : (isSelected ? 1.0 : 0.08 * baseOpacity);
+
+    const targetBoost = (isSelected && !isVolumetric) ? 0.24 : 0.0;
+    const targetEmissive = isVolumetric ? 0.52 : 0.0;
+    const targetScale = (isSelected && !isVolumetric) ? 1.015 : 1.0;
 
     const animData = tileGroup.userData;
 
@@ -477,35 +494,68 @@ function animateTileTransitions(sliceTilesMap, depthGuidesGroup, props) {
         tileGroup.position.y = animData.currentY;
         tileGroup.scale.set(animData.currentScale, 1.0, animData.currentScale);
 
-        if (animData.topMesh?.material?.uniforms) {
-          animData.topMesh.material.uniforms.uLayerOpacity.value = animData.currentOpacity;
-          animData.topMesh.material.uniforms.uSelectedBoost.value = animData.currentBoost;
+        if (animData.topMesh) {
+          animData.topMesh.visible = true;
+          if (animData.topMesh.material) {
+            animData.topMesh.material.transparent = true;
+            animData.topMesh.material.depthWrite = false;
+            animData.topMesh.material.depthTest = true;
+
+            // 3. Enforce Additive Blending in Volumetric Stack mode
+            const targetBlending = isVolumetric ? THREE.AdditiveBlending : THREE.NormalBlending;
+            if (animData.topMesh.material.blending !== targetBlending) {
+              animData.topMesh.material.blending = targetBlending;
+              animData.topMesh.material.needsUpdate = true;
+            }
+
+            if (animData.topMesh.material.uniforms) {
+              animData.topMesh.material.uniforms.uLayerOpacity.value = animData.currentOpacity;
+              animData.topMesh.material.uniforms.uSelectedBoost.value = animData.currentBoost;
+              if (animData.topMesh.material.uniforms.uEmissiveBoost) {
+                animData.topMesh.material.uniforms.uEmissiveBoost.value = targetEmissive;
+              }
+            }
+          }
         }
-        if (animData.sideMesh?.material?.uniforms) {
-          animData.sideMesh.material.uniforms.uLayerOpacity.value = animData.currentOpacity;
-          animData.sideMesh.material.uniforms.uSelectedBoost.value = animData.currentBoost;
+
+        if (animData.sideMesh) {
+          animData.sideMesh.visible = !isVolumetric;
+          if (animData.sideMesh.material) {
+            animData.sideMesh.material.transparent = true;
+            animData.sideMesh.material.depthWrite = false;
+            if (animData.sideMesh.material.uniforms) {
+              animData.sideMesh.material.uniforms.uLayerOpacity.value = animData.currentOpacity;
+              animData.sideMesh.material.uniforms.uSelectedBoost.value = animData.currentBoost;
+            }
+          }
         }
         if (animData.bottomMesh?.material) {
           animData.bottomMesh.material.opacity = animData.currentOpacity * 0.6;
         }
         if (animData.frameLine?.material) {
-          animData.frameLine.material.opacity = isSelected ? 0.85 : 0.45;
-          animData.frameLine.material.color.setHex(isSelected ? 0x00f0ff : 0x2c5a78);
+          animData.frameLine.material.opacity = isVolumetric ? 0.25 : (isSelected ? 0.85 : 0.25);
+          animData.frameLine.material.color.setHex((isSelected && !isVolumetric) ? 0x00f0ff : 0x2c5a78);
         }
         if (animData.bottomFrameLine?.material) {
-          animData.bottomFrameLine.material.opacity = isSelected ? 0.45 : 0.12;
-          animData.bottomFrameLine.material.color.setHex(isSelected ? 0x00c4e6 : 0x142b3a);
+          animData.bottomFrameLine.material.opacity = isVolumetric ? 0.10 : (isSelected ? 0.45 : 0.08);
+          animData.bottomFrameLine.material.color.setHex((isSelected && !isVolumetric) ? 0x00c4e6 : 0x142b3a);
         }
       },
     });
   });
 
-  if (depthGuidesGroup && depthGuidesGroup.children) {
-    depthGuidesGroup.children.forEach((guideGroup) => {
+
+
+
+  if (depthGuidesGroup) {
+    depthGuidesGroup.traverse((guideGroup) => {
       if (guideGroup.userData && guideGroup.userData.depth !== undefined) {
-        const depth = guideGroup.userData.depth;
-        const targetY = getDepthYPosition(depth, availableDepths, verticalExaggeration);
-        const isSelected = depth === activeDepth;
+
+        const depth = Number(guideGroup.userData.depth);
+        const depthY = getDepthYPosition(depth, availableDepths, verticalExaggeration);
+        const isSelected = depth === numericActiveDepth;
+
+        const targetY = isSelected ? depthY + 0.22 : depthY;
 
         animate(guideGroup.position, {
           y: targetY,
@@ -515,15 +565,40 @@ function animateTileTransitions(sliceTilesMap, depthGuidesGroup, props) {
 
         const sprite = guideGroup.children.find((c) => c.isSprite);
         if (sprite && sprite.material) {
+          if (sprite.userData.isSelected !== isSelected) {
+            sprite.userData.isSelected = isSelected;
+            const oldMap = sprite.material.map;
+            sprite.material.map = createDepthLabelTexture(`${depth}m`, isSelected);
+            sprite.material.needsUpdate = true;
+            if (oldMap) oldMap.dispose();
+          }
+
+          const targetScaleX = isSelected ? 1.45 : 0.88;
+          const targetScaleY = isSelected ? 0.58 : 0.35;
+
+          animate(sprite.scale, {
+            x: targetScaleX,
+            y: targetScaleY,
+            duration: 400,
+            ease: 'outCubic',
+          });
+
           animate(sprite.material, {
             opacity: isSelected ? 1.0 : 0.65,
             duration: 400,
             ease: 'outCubic',
           });
         }
+
+        const line = guideGroup.children.find((c) => c.isLine);
+        if (line && line.material) {
+          line.material.color.setHex(isSelected ? 0x00f0ff : 0x38bdf8);
+          line.material.opacity = isSelected ? 0.95 : 0.35;
+        }
       }
     });
   }
+
 }
 
 function createWaterVolume(metrics) {
@@ -617,82 +692,198 @@ function createWaterColumnWalls(metrics) {
 }
 
 function createOceanSurface() {
-  const geometry = new THREE.PlaneGeometry(FOOTPRINT_X, FOOTPRINT_Z, 160, 120);
-  const material = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-    uniforms: {
-      uTime: { value: 0 },
-    },
-    vertexShader: `
-      uniform float uTime;
-      varying vec2 vUv;
-      varying float vWave;
-      void main() {
-        vUv = uv;
-        vec3 p = position;
-        float wave = sin(p.x * 1.4 + uTime * 0.7) * 0.025 + cos(p.y * 1.7 - uTime * 0.45) * 0.018;
-        p.z += wave;
-        vWave = wave;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-      }
-    `,
-    fragmentShader: `
-      varying vec2 vUv;
-      varying float vWave;
-      void main() {
-        float rim = smoothstep(0.0, 0.18, min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y)));
-        vec3 color = mix(vec3(0.02, 0.18, 0.25), vec3(0.10, 0.55, 0.68), 0.45 + vWave * 4.0);
-        gl_FragColor = vec4(color, 0.18 * rim);
-      }
-    `,
-  });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.y = 0.09;
-  mesh.renderOrder = 900;
-  return mesh;
+  // Empty group container to ensure top data slice colormap renders 100% pure and un-tinted
+  return new THREE.Group();
+}
+
+
+
+// Multi-octave fractal noise generator for realistic oceanic bathymetry
+function fbmNoise(x, z) {
+  let total = 0;
+  let amplitude = 1.0;
+  let frequency = 0.35;
+  let maxVal = 0;
+
+  for (let i = 0; i < 4; i += 1) {
+    const nx = x * frequency;
+    const nz = z * frequency;
+    const n = Math.sin(nx * 1.3 + nz * 0.7) * Math.cos(nz * 1.5 - nx * 0.8) +
+              Math.sin(nx * 2.7 - nz * 1.9) * 0.5 +
+              Math.cos(nx * 0.9 + nz * 3.1) * 0.25;
+    total += n * amplitude;
+    maxVal += amplitude;
+    frequency *= 2.1;
+    amplitude *= 0.48;
+  }
+  return total / maxVal;
 }
 
 function terrainHeight(x, z) {
-  const shelf = THREE.MathUtils.smoothstep(-x, -7.5, 2.5) * 1.25;
-  const ridge = Math.exp(-Math.pow((x + 3.4) / 2.2, 2)) * (0.8 + Math.sin(z * 1.4) * 0.18);
-  const basin = -Math.exp(-Math.pow((x - 3.6) / 4.0, 2)) * 0.55;
-  const relief = Math.sin(x * 1.7 + z * 0.8) * 0.12 + Math.cos(x * 0.55 - z * 1.1) * 0.16;
-  return shelf + ridge + basin + relief;
+  // Continental shelf slope
+  const shelf = THREE.MathUtils.smoothstep(-x, -8.0, 3.0) * 1.8;
+  
+  // Rugged mid-oceanic ridge system with steep mountain peaks
+  const ridgeBase = Math.exp(-Math.pow((x + 2.5) / 2.8, 2)) * 1.6;
+  const ridgeDetail = Math.pow(Math.abs(Math.sin(x * 1.2 + z * 1.4) * Math.cos(z * 1.8 - x * 0.9)), 1.3) * 1.25;
+  const mountains = (ridgeBase + ridgeDetail) * 0.88;
+
+  // Deep ocean trench
+  const trench = -Math.exp(-Math.pow((x - 4.2) / 1.8, 2)) * 1.4;
+
+  // Fine fractal detail (rocks, crags, seamounts)
+  const detail = fbmNoise(x, z) * 0.75;
+
+  return shelf + mountains + trench + detail;
+}
+
+function createTerrainAlbedoTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 1024;
+  const ctx = canvas.getContext('2d');
+
+  // Deep ocean basalt rock gradient
+  const grad = ctx.createLinearGradient(0, 0, 1024, 1024);
+  grad.addColorStop(0, '#091526');
+  grad.addColorStop(0.35, '#0f243b');
+  grad.addColorStop(0.7, '#071322');
+  grad.addColorStop(1.0, '#0d2a40');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  // Grain noise for basalt sediment texture
+  const imgData = ctx.getImageData(0, 0, 1024, 1024);
+  const data = imgData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const noise = (Math.random() - 0.5) * 20;
+    data[i] = Math.max(0, Math.min(255, data[i] + noise));
+    data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + noise * 1.2));
+    data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + noise * 1.5));
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(3, 3);
+  return texture;
+}
+
+function createTerrainNormalTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(512, 512);
+  const data = imgData.data;
+
+  // Procedural normal vectors for sharp surface micro-cracks and ridges
+  for (let y = 0; y < 512; y += 1) {
+    for (let x = 0; x < 512; x += 1) {
+      const idx = (y * 512 + x) * 4;
+      const nx = (x / 512) * 22;
+      const ny = (y / 512) * 22;
+      
+      const hL = Math.sin((nx - 0.1) * 1.5) * Math.cos(ny * 1.5);
+      const hR = Math.sin((nx + 0.1) * 1.5) * Math.cos(ny * 1.5);
+      const hD = Math.sin(nx * 1.5) * Math.cos((ny - 0.1) * 1.5);
+      const hU = Math.sin(nx * 1.5) * Math.cos((ny + 0.1) * 1.5);
+
+      const dx = (hR - hL) * 2.2;
+      const dy = (hU - hD) * 2.2;
+
+      const len = Math.sqrt(dx * dx + dy * dy + 1.0);
+      const normX = (dx / len) * 0.5 + 0.5;
+      const normY = (dy / len) * 0.5 + 0.5;
+      const normZ = (1.0 / len) * 0.5 + 0.5;
+
+      data[idx] = Math.floor(normX * 255);
+      data[idx + 1] = Math.floor(normY * 255);
+      data[idx + 2] = Math.floor(normZ * 255);
+      data[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(4, 4);
+  return texture;
+}
+
+function getBathymetricColor(normH) {
+  const c = new THREE.Color();
+  const cDeep = new THREE.Color(0x06152d);  // Deepest trench (Navy/Indigo)
+  const cNavy = new THREE.Color(0x0284c7);  // Lower slope (Oceanic Azure)
+  const cCyan = new THREE.Color(0x06b6d4);  // Mid slope (Bright Cyan)
+  const cTeal = new THREE.Color(0x10b981);  // Upper slope (Emerald Teal)
+  const cAmber = new THREE.Color(0xf59e0b); // High ridge (Golden Amber)
+  const cPeak = new THREE.Color(0xfef08a);  // Mountain crest (Sunlit Yellow)
+
+  if (normH < 0.22) {
+    c.lerpColors(cDeep, cNavy, normH / 0.22);
+  } else if (normH < 0.48) {
+    c.lerpColors(cNavy, cCyan, (normH - 0.22) / 0.26);
+  } else if (normH < 0.72) {
+    c.lerpColors(cCyan, cTeal, (normH - 0.48) / 0.24);
+  } else if (normH < 0.88) {
+    c.lerpColors(cTeal, cAmber, (normH - 0.72) / 0.16);
+  } else {
+    c.lerpColors(cAmber, cPeak, (normH - 0.88) / 0.12);
+  }
+  return c;
 }
 
 function createSeafloor(metrics) {
-  const geometry = new THREE.PlaneGeometry(FOOTPRINT_X * 1.14, FOOTPRINT_Z * 1.16, 100, 80);
+  // 1. High-Density Geometry Subdivision (200 x 160 subdivisions = 32,000 vertices)
+  const geometry = new THREE.PlaneGeometry(FOOTPRINT_X * 1.24, FOOTPRINT_Z * 1.24, 200, 160);
   const pos = geometry.attributes.position;
   const colors = [];
 
+  // 2. Vertex Displacement & Dynamic Bathymetric Heatmap Gradient
   for (let i = 0; i < pos.count; i += 1) {
     const x = pos.getX(i);
     const z = pos.getY(i);
-    const h = terrainHeight(x, z) * 0.45;
+    const h = terrainHeight(x, z) * 0.55;
     pos.setZ(i, h);
 
-    const c = new THREE.Color(0x0a1c2e);
-    c.lerp(new THREE.Color(0x020b14), THREE.MathUtils.clamp(0.5 - h * 0.2, 0.0, 1.0));
+    // Altitude & Ambient Occlusion (AO) shading
+    const normH = THREE.MathUtils.clamp((h + 0.8) / 2.2, 0.0, 1.0);
+    const c = getBathymetricColor(normH);
+
+    // Crevice Ambient Occlusion (AO): Slight shadow for valleys while keeping base bright
+    const ao = Math.pow(normH, 0.5);
+    c.multiplyScalar(0.62 + 0.38 * ao);
+
     colors.push(c.r, c.g, c.b);
   }
 
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
 
+  // 3. Brightened Neutral Base Material & Optimized Roughness/Metalness Properties
   const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
     vertexColors: true,
-    roughness: 0.90,
-    metalness: 0.1,
+    map: createTerrainAlbedoTexture(),
+    normalMap: createTerrainNormalTexture(),
+    normalScale: new THREE.Vector2(1.15, 1.15),
+    roughness: 0.55,
+    metalness: 0.18,
     side: THREE.DoubleSide,
   });
+
   const mesh = new THREE.Mesh(geometry, material);
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.y = metrics.seafloorY;
+  mesh.receiveShadow = true;
+  mesh.castShadow = true;
   return mesh;
 }
+
+
 
 function createCoastContext(metrics) {
   const shape = new THREE.Shape();
@@ -718,23 +909,63 @@ function createCoastContext(metrics) {
   return mesh;
 }
 
+function drawRoundRect(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(x, y, width, height, radius);
+  } else {
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+  }
+}
+
 function createDepthLabelTexture(text, isSelected) {
   const canvas = document.createElement('canvas');
-  canvas.width = 144;
-  canvas.height = 56;
+  canvas.width = 160;
+  canvas.height = 64;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = isSelected ? 'rgba(190, 219, 228, 0.86)' : 'rgba(8, 18, 31, 0.58)';
-  ctx.strokeStyle = isSelected ? 'rgba(255, 255, 255, 0.52)' : 'rgba(116, 151, 166, 0.14)';
-  ctx.lineWidth = isSelected ? 2 : 1;
-  ctx.roundRect(14, 10, 116, 36, 6);
-  ctx.fill();
-  ctx.stroke();
-  ctx.font = isSelected ? 'bold 19px monospace' : '16px monospace';
-  ctx.fillStyle = isSelected ? '#102a35' : '#8fa0ad';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, 72, 28);
+
+  if (isSelected) {
+    // Active Depth Badge: Glowing Cyan Background with Bold Black Monospace Text
+    ctx.fillStyle = 'rgba(0, 230, 255, 0.96)';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3.5;
+    ctx.shadowColor = '#00f0ff';
+    ctx.shadowBlur = 16;
+    drawRoundRect(ctx, 12, 10, 136, 44, 12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    ctx.font = 'bold 22px monospace';
+    ctx.fillStyle = '#020814';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 80, 32);
+  } else {
+    // Unselected Depth Capsule: Muted Dark Blue/Slate with Soft Gray Text
+    ctx.fillStyle = 'rgba(12, 26, 46, 0.85)';
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+    ctx.lineWidth = 1.5;
+    drawRoundRect(ctx, 14, 10, 132, 44, 10);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.font = 'bold 17px monospace';
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 80, 32);
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
@@ -745,13 +976,17 @@ function createDepthLabelTexture(text, isSelected) {
 function createDepthGuides(props) {
   const group = new THREE.Group();
   const { availableDepths, activeDepth, verticalExaggeration } = props;
-  const depths = availableDepths.length ? availableDepths : [0, 50, 100, 200, 500];
+  const depths = availableDepths.length ? availableDepths.map(Number) : [0, 50, 100, 200, 500];
+  const numericActiveDepth = Number(activeDepth);
+
   depths.forEach((depth) => {
     const y = getDepthYPosition(depth, depths, verticalExaggeration);
-    const isSelected = depth === activeDepth;
+    const isSelected = depth === numericActiveDepth;
 
     const lineGroup = new THREE.Group();
     lineGroup.userData.depth = depth;
+    lineGroup.position.y = isSelected ? y + 0.22 : y;
+
 
     const lineGeometry = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(FOOTPRINT_X / 2 - 0.05, 0, FOOTPRINT_Z / 2 + 0.1),
@@ -760,9 +995,9 @@ function createDepthGuides(props) {
     const line = new THREE.Line(
       lineGeometry,
       new THREE.LineBasicMaterial({
-        color: isSelected ? 0x00f0ff : 0x263f4e,
+        color: isSelected ? 0x00f0ff : 0x38bdf8,
         transparent: true,
-        opacity: isSelected ? 0.65 : 0.15,
+        opacity: isSelected ? 0.95 : 0.35,
       }),
     );
     lineGroup.add(line);
@@ -770,16 +1005,18 @@ function createDepthGuides(props) {
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: createDepthLabelTexture(`${depth}m`, isSelected),
       transparent: true,
-      opacity: isSelected ? 1 : 0.72,
+      opacity: isSelected ? 1.0 : 0.65,
       depthWrite: false,
     }));
     sprite.position.set(FOOTPRINT_X / 2 + 1.65, 0, FOOTPRINT_Z / 2 + 0.1);
-    sprite.scale.set(isSelected ? 1.02 : 0.84, isSelected ? 0.4 : 0.34, 1);
+    sprite.scale.set(isSelected ? 1.45 : 0.88, isSelected ? 0.58 : 0.35, 1);
+    sprite.userData.isSelected = isSelected;
     lineGroup.add(sprite);
 
-    lineGroup.position.y = y;
     group.add(lineGroup);
   });
+
+
 
   const cornerMaterial = new THREE.LineBasicMaterial({ color: 0x294b5c, transparent: true, opacity: 0.075 });
   [
@@ -798,6 +1035,23 @@ function createDepthGuides(props) {
   return group;
 }
 
+function collectSingleSliceRange(slice) {
+  let min = Infinity;
+  let max = -Infinity;
+  slice.values?.forEach((row) => {
+    row.forEach((value) => {
+      if (Number.isFinite(value)) {
+        min = Math.min(min, value);
+        max = Math.max(max, value);
+      }
+    });
+  });
+  if (min === Infinity || min === max) {
+    return { min: 0, max: 1 };
+  }
+  return { min, max };
+}
+
 function rebuildSlicesMesh(slicesGroup, depthGuidesGroup, sliceTilesMapRef, props) {
   clearGroup(slicesGroup);
   clearGroup(depthGuidesGroup);
@@ -806,21 +1060,27 @@ function rebuildSlicesMesh(slicesGroup, depthGuidesGroup, sliceTilesMapRef, prop
   if (!slicesDataIsRenderable(props.slicesData)) return;
 
   const rawRange = collectFieldRange(props.slicesData);
-  const effectiveRange = {
+  const globalEffectiveRange = {
     min: props.minOverride !== null ? props.minOverride : rawRange.min,
     max: props.maxOverride !== null ? props.maxOverride : rawRange.max,
   };
 
   props.slicesData.forEach((slice) => {
     if (!slice.values?.length) return;
-    const tileGroup = createRealTileGroup(slice, props, effectiveRange);
+    const sliceRange = props.scaleMode === 'local'
+      ? collectSingleSliceRange(slice)
+      : globalEffectiveRange;
+    const tileGroup = createRealTileGroup(slice, props, sliceRange);
     sliceTilesMapRef.current.set(slice.depth, tileGroup);
     slicesGroup.add(tileGroup);
   });
 
+
+
   depthGuidesGroup.add(createDepthGuides(props));
   animateTileTransitions(sliceTilesMapRef.current, depthGuidesGroup, props);
 }
+
 
 function slicesDataIsRenderable(slicesData) {
   return Array.isArray(slicesData) && slicesData.some((slice) => slice.values?.length && slice.values[0]?.length);
@@ -844,6 +1104,50 @@ function createObservationHaloTexture() {
   return texture;
 }
 
+function createFloatTagTexture(float_id) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 160;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Dark glass capsule container with glowing cyan border
+  ctx.fillStyle = 'rgba(2, 10, 22, 0.96)';
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.95)';
+  ctx.lineWidth = 4.5;
+  ctx.roundRect(12, 12, 488, 136, 32);
+  ctx.fill();
+  ctx.stroke();
+
+  // Glowing Green Live Pulse Indicator Dot
+  ctx.fillStyle = '#34d399';
+  ctx.shadowColor = '#34d399';
+  ctx.shadowBlur = 12;
+  ctx.beginPath();
+  ctx.arc(52, 80, 11, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Float WMO ID Title (Clean formatting: "ARGO FLOAT #2901234")
+  const shortId = String(float_id || 'argo_2901234').replace(/^argo_?/i, '#');
+  ctx.font = 'bold 30px monospace';
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(`ARGO FLOAT ${shortId}`, 82, 36);
+
+  // Informative Action Subtitle
+  ctx.font = 'bold 23px monospace';
+  ctx.fillStyle = '#38bdf8';
+  ctx.fillText('Click to View Profile →', 82, 88);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return texture;
+}
+
+
 function rebuildFloatsMesh(floatsGroup, props) {
   clearGroup(floatsGroup);
   const { floatsData, slicesData, availableDepths, verticalExaggeration } = props;
@@ -862,42 +1166,63 @@ function rebuildFloatsMesh(floatsGroup, props) {
     group.position.set(x, 0.26, z);
     group.userData.float_id = float.float_id;
 
-    const stemHeight = Math.abs(deepestY) + 0.4;
+    // 1. Aceternity Surface Ripple Ring (Surface Anchor)
+    const ringGeo = new THREE.RingGeometry(0.1, 0.19, 32);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x00d2ff,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.7,
+    });
+    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+    ringMesh.rotation.x = -Math.PI / 2;
+    ringMesh.position.y = -0.16;
+    ringMesh.userData.float_id = float.float_id;
+    group.add(ringMesh);
+
+    // 2. Cyan Vertical Laser Beam Pin Stem (Extended 1.3 units ABOVE slice)
+    const extensionAbove = 1.3;
+    const stemHeight = Math.abs(deepestY) + extensionAbove;
     const stem = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.006, 0.006, stemHeight, 8),
-      new THREE.MeshBasicMaterial({ color: 0x9cc9d4, transparent: true, opacity: 0.11 }),
+      new THREE.CylinderGeometry(0.014, 0.014, stemHeight, 8),
+      new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.85 }),
     );
-    stem.position.y = -stemHeight / 2;
+    stem.position.y = (extensionAbove - Math.abs(deepestY)) / 2;
     stem.userData.float_id = float.float_id;
     group.add(stem);
 
+    // 3. Glowing Sensor Head Beacon Node (Elevated 1.3 units above slice)
     const sensor = new THREE.Mesh(
-      new THREE.SphereGeometry(0.065, 16, 16),
+      new THREE.SphereGeometry(0.09, 20, 20),
       new THREE.MeshStandardMaterial({
-        color: 0xd8f4f8,
-        emissive: 0x4faebe,
-        emissiveIntensity: 0.12,
-        roughness: 0.46,
-        metalness: 0,
+        color: 0x00f0ff,
+        emissive: 0x00d2ff,
+        emissiveIntensity: 0.9,
+        roughness: 0.2,
+        metalness: 0.1,
       }),
     );
+    sensor.position.y = extensionAbove;
     sensor.userData.float_id = float.float_id;
     group.add(sensor);
 
-    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: createObservationHaloTexture(),
+    // 4. Floating Aceternity UI Pin Tag (Elevated 1.95 units above slice)
+    const tagSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: createFloatTagTexture(float.float_id),
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.98,
       depthWrite: false,
-      color: 0xd8f4f8,
     }));
-    halo.scale.set(0.34, 0.34, 1);
-    halo.userData.float_id = float.float_id;
-    group.add(halo);
+    tagSprite.position.set(0, extensionAbove + 0.62, 0);
+    tagSprite.scale.set(2.4, 0.75, 1);
+    tagSprite.userData.float_id = float.float_id;
+    group.add(tagSprite);
 
     floatsGroup.add(group);
   });
 }
+
+
 
 function rebuildStaticMeshes(staticGroup, props) {
   clearGroup(staticGroup);
@@ -936,6 +1261,12 @@ export default function Scene({
   const floatsGroupRef = useRef(null);
   const depthGuidesGroupRef = useRef(null);
   const sliceTilesMapRef = useRef(new Map());
+  const onFloatSelectRef = useRef(onFloatSelect);
+
+
+  useEffect(() => {
+    onFloatSelectRef.current = onFloatSelect;
+  }, [onFloatSelect]);
 
   const propsRef = useRef({
     slicesData,
@@ -951,6 +1282,7 @@ export default function Scene({
     verticalExaggeration,
     sliceOpacity,
   });
+
 
   useEffect(() => {
     propsRef.current = {
@@ -1006,10 +1338,10 @@ export default function Scene({
     controls.maxPolarAngle = Math.PI * 0.78;
     controlsRef.current = controls;
 
-    scene.add(new THREE.HemisphereLight(0xc7efff, 0x09111f, 1.15));
+    scene.add(new THREE.HemisphereLight(0xe0f7ff, 0x162c4a, 2.35));
 
-    const sun = new THREE.DirectionalLight(0xffffff, 1.95);
-    sun.position.set(-6, 12, 8);
+    const sun = new THREE.DirectionalLight(0xffffff, 2.75);
+    sun.position.set(-6, 14, 8);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.near = 1;
@@ -1020,13 +1352,14 @@ export default function Scene({
     sun.shadow.camera.bottom = -18;
     scene.add(sun);
 
-    const sideLight = new THREE.DirectionalLight(0x8bd8e8, 0.22);
-    sideLight.position.set(9, -2, -9);
+    const sideLight = new THREE.DirectionalLight(0x7dd3fc, 0.85);
+    sideLight.position.set(9, 2, -9);
     scene.add(sideLight);
 
-    const terrainGrazingLight = new THREE.DirectionalLight(0xffdfb0, 0.38);
-    terrainGrazingLight.position.set(10, 5, 3);
+    const terrainGrazingLight = new THREE.DirectionalLight(0xfff2d4, 1.85);
+    terrainGrazingLight.position.set(12, 10, 8);
     scene.add(terrainGrazingLight);
+
 
     const staticGroup = new THREE.Group();
     const slicesGroup = new THREE.Group();
@@ -1063,12 +1396,17 @@ export default function Scene({
     const handlePointerDown = (event) => {
       updateMouse(event);
       const floatId = pickFloat();
-      if (floatId && onFloatSelect) onFloatSelect(floatId);
+      if (floatId && onFloatSelectRef.current) {
+        onFloatSelectRef.current(floatId);
+      }
     };
+
 
     const handlePointerMove = (event) => {
       updateMouse(event);
-      renderer.domElement.style.cursor = pickFloat() ? 'pointer' : 'grab';
+      const hoveredId = pickFloat();
+      activeHoveredFloatId = hoveredId;
+      renderer.domElement.style.cursor = hoveredId ? 'pointer' : 'grab';
     };
 
     renderer.domElement.addEventListener('pointerdown', handlePointerDown);
@@ -1081,15 +1419,66 @@ export default function Scene({
       const elapsed = clock.getElapsedTime();
       controls.update();
 
+      // Organic ocean surface breathing swell motion for realistic sea state
+      const surfaceSwell = Math.sin(elapsed * 1.25) * 0.025 + Math.cos(elapsed * 0.85) * 0.015;
+
       staticGroup.children.forEach((child) => {
-        if (child.userData.isOceanSurface && child.material?.uniforms?.uTime) {
-          child.material.uniforms.uTime.value = elapsed;
+        if (child.userData.isOceanSurface) {
+          if (child.material?.uniforms?.uTime) {
+            child.material.uniforms.uTime.value = elapsed;
+          }
+          child.position.y = 0.09 + surfaceSwell * 0.5;
         }
       });
 
+      if (slicesGroupRef.current) {
+        slicesGroupRef.current.children.forEach((tileGroup) => {
+          if (tileGroup.userData?.topMesh?.material?.uniforms?.uTime) {
+            tileGroup.userData.topMesh.material.uniforms.uTime.value = elapsed;
+          }
+          if (tileGroup.userData && Number(tileGroup.userData.depth) === 0) {
+            const baseY = tileGroup.userData.currentY ?? 0;
+            tileGroup.position.y = baseY + surfaceSwell;
+          }
+        });
+      }
+
+
+
       floatsGroup.children.forEach((marker, index) => {
-        marker.children[1].position.y = Math.sin(elapsed * 1.8 + index) * 0.035;
+        const isHovered = Boolean(marker.userData.float_id && marker.userData.float_id === activeHoveredFloatId);
+        const bob = Math.sin(elapsed * 1.8 + index) * 0.03;
+
+
+        // 1. Sensor beacon head node (enlarges slightly when hovered)
+        if (marker.children[2]) {
+          marker.children[2].position.y = 1.3 + bob;
+          const s = isHovered ? 1.4 : 1.0;
+          marker.children[2].scale.lerp(new THREE.Vector3(s, s, s), 0.2);
+        }
+
+        // 2. Floating Aceternity Tag (Pop up & Enlarge on hover)
+        if (marker.children[3]) {
+          const baseW = 2.4;
+          const baseH = 0.75;
+          const targetW = isHovered ? baseW * 1.42 : baseW;
+          const targetH = isHovered ? baseH * 1.42 : baseH;
+          const targetY = 1.92 + (isHovered ? 0.18 : 0) + bob;
+
+          marker.children[3].scale.x += (targetW - marker.children[3].scale.x) * 0.2;
+          marker.children[3].scale.y += (targetH - marker.children[3].scale.y) * 0.2;
+          marker.children[3].position.y += (targetY - marker.children[3].position.y) * 0.2;
+          marker.children[3].material.opacity = isHovered ? 1.0 : 0.95;
+        }
+
+        // 3. Surface ripple ring (expands when hovered)
+        if (marker.children[0]) {
+          const s = (isHovered ? 1.5 : 1.0) + Math.sin(elapsed * 2.2 + index) * 0.22;
+          marker.children[0].scale.set(s, s, s);
+        }
       });
+
+
 
       if (cameraRef.current && slicesGroupRef.current && propsRef.current.availableDepths?.length) {
         const cameraY = cameraRef.current.position.y;
@@ -1103,8 +1492,9 @@ export default function Scene({
             const depthIndex = sortedDepths.indexOf(depth);
 
             const baseOrder = isCameraAbove
-              ? 1000 + depthIndex * 40
-              : 1000 + (sortedDepths.length - depthIndex) * 40;
+              ? 1000 + (sortedDepths.length - depthIndex) * 40
+              : 1000 + depthIndex * 40;
+
 
             tileGroup.renderOrder = baseOrder;
             if (tileGroup.userData.bottomMesh) tileGroup.userData.bottomMesh.renderOrder = baseOrder;
@@ -1120,15 +1510,22 @@ export default function Scene({
     animate();
 
     const handleResize = () => {
+      if (!container) return;
       const w = container.clientWidth || window.innerWidth;
       const h = container.clientHeight || window.innerHeight;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
+
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
+    resizeObserver.observe(container);
     window.addEventListener('resize', handleResize);
 
     return () => {
+      resizeObserver.disconnect();
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
       renderer.domElement.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('resize', handleResize);
@@ -1139,14 +1536,17 @@ export default function Scene({
         container.removeChild(renderer.domElement);
       }
     };
-  }, [onFloatSelect]);
+
+  }, []);
+
 
   useEffect(() => {
     if (!staticGroupRef.current || !slicesGroupRef.current || !depthGuidesGroupRef.current || !floatsGroupRef.current) return;
     rebuildStaticMeshes(staticGroupRef.current, propsRef.current);
     rebuildSlicesMesh(slicesGroupRef.current, depthGuidesGroupRef.current, sliceTilesMapRef, propsRef.current);
     rebuildFloatsMesh(floatsGroupRef.current, propsRef.current);
-  }, [slicesData, palette, scaleMode, minOverride, maxOverride]);
+  }, [slicesData, activeVariable, palette, scaleMode, minOverride, maxOverride]);
+
 
   useEffect(() => {
     if (!sliceTilesMapRef.current.size || !depthGuidesGroupRef.current) return;
@@ -1161,18 +1561,19 @@ export default function Scene({
     <div className="relative w-full h-full select-none">
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
-      <div className="absolute top-4 right-4 bg-ocean-panel/70 backdrop-blur-md border border-slate-700/50 px-3.5 py-2 rounded-lg text-[11px] font-mono text-slate-300 shadow-xl flex items-center gap-3">
-        <div className="w-2 h-2 rounded-full bg-cyan-300/80" />
+      <div className="absolute top-4 right-4 bg-ocean-panel/85 backdrop-blur-xl border border-ocean-border px-3 py-1.5 rounded-xl text-[10px] font-mono text-slate-300 shadow-2xl flex items-center gap-2">
+        <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
         <div>
-          Variable: <span className="text-white font-bold tracking-wide">{activeVariable.toUpperCase()}</span>
+          <span className="text-slate-400">VAR:</span> <span className="text-white font-bold tracking-wide">{activeVariable.toUpperCase()}</span>
         </div>
         <div>
-          Selected Depth: <span className="text-cyan-200 font-bold">{activeDepth}m</span>
+          <span className="text-slate-400">DEPTH:</span> <span className="text-cyan-300 font-bold">{activeDepth}m</span>
         </div>
         <div className="hidden xl:block text-slate-400">
           {VARIABLE_UNITS[activeVariable] || ''}
         </div>
       </div>
+
     </div>
   );
 }

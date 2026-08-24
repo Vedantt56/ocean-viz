@@ -46,19 +46,28 @@ export default function ControlPanel({
 
   const handleSliderChange = (e) => {
     const depthIdx = parseInt(e.target.value, 10);
-    const selectedDepth = depthLevels[depthIdx];
+    const selectedDepth = Number(depthLevels[depthIdx]);
     if (onSelectDepth) onSelectDepth(selectedDepth);
   };
 
-  const currentDepthIdx = depthLevels.indexOf(activeDepth) !== -1
-    ? depthLevels.indexOf(activeDepth)
+  const numericActiveDepth = Number(activeDepth);
+  const currentDepthIdx = depthLevels.findIndex((d) => Number(d) === numericActiveDepth) !== -1
+    ? depthLevels.findIndex((d) => Number(d) === numericActiveDepth)
     : 0;
+
+
+  const handleToggleCollapse = (collapsedState) => {
+    setIsCollapsed(collapsedState);
+    setTimeout(() => {
+      window.dispatchEvent(new Event('resize'));
+    }, 30);
+  };
 
   if (isCollapsed) {
     return (
       <aside className="w-12 glass-panel border-r border-ocean-border flex flex-col items-center py-4 z-20 shadow-glass">
         <button
-          onClick={() => setIsCollapsed(false)}
+          onClick={() => handleToggleCollapse(false)}
           className="w-8 h-8 flex items-center justify-center rounded-lg border border-ocean-border/60 text-cyan-300 hover:bg-cyan-500/10 hover:border-cyan-400/60 transition-colors"
           title="Expand Panel"
         >
@@ -72,18 +81,19 @@ export default function ControlPanel({
   return (
     <aside className="w-80 glass-panel border-r border-ocean-border p-4.5 flex flex-col gap-4 z-20 shadow-glass overflow-y-auto font-sans relative">
       <button
-        onClick={() => setIsCollapsed(true)}
+        onClick={() => handleToggleCollapse(true)}
         className="absolute top-3 right-3 w-6 h-6 flex items-center justify-center rounded-md border border-ocean-border/60 text-slate-400 hover:text-cyan-300 hover:border-cyan-400/60 transition-colors"
         title="Collapse Panel"
       >
         <ChevronLeft className="w-3.5 h-3.5" />
       </button>
 
+
       {/* Header Bar */}
       <div className="pb-3.5 border-b border-ocean-border/60">
-        <div className="flex items-center gap-2mb-1">
-          <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-cyan-glow" />
-          <h1 className="text-xs font-bold tracking-widest text-white uppercase font-mono pl-1">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-cyan-glow shrink-0" />
+          <h1 className="text-xs font-bold tracking-wider text-white uppercase font-mono">
             OCEAN 3D WORKSPACE
           </h1>
         </div>
@@ -91,6 +101,7 @@ export default function ControlPanel({
           MoES / INCOIS Hydrodynamic Domain
         </p>
       </div>
+
 
       {/* Section 1: OCEAN VARIABLE FIELD */}
       <div className="pb-3 border-b border-ocean-border/40">

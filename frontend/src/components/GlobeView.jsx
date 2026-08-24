@@ -1,7 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Compass, ArrowRight, Layers, Navigation, Database } from 'lucide-react';
+import { Compass, ArrowRight, Layers, Navigation, Database, Sparkles } from 'lucide-react';
+import { Globe3D } from '@/components/ui/3d-globe';
+
+const ACETERNITY_MARKERS = [
+  {
+    lat: 15.0,
+    lng: 85.0,
+    label: "Bay of Bengal EEZ",
+    type: "pin",
+  },
+];
+
+
 
 const EARTH_TEXTURE_URL = "https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/textures/planets/earth_atmos_2048.jpg";
 
@@ -149,6 +161,8 @@ export default function GlobeView({ onSelectRegion, floatsCount = 0 }) {
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [activeDomainTile] = useState(DOMAIN_REGIONS[0]);
   const [thumbnailUrl, setThumbnailUrl] = useState('');
+  const [useAceternityGlobe, setUseAceternityGlobe] = useState(true);
+
 
   const isInteractingRef = useRef(false);
   const interactTimeoutRef = useRef(null);
@@ -448,9 +462,15 @@ export default function GlobeView({ onSelectRegion, floatsCount = 0 }) {
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
+
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
+    resizeObserver.observe(container);
     window.addEventListener('resize', handleResize);
 
     return () => {
+      resizeObserver.disconnect();
       controls.removeEventListener('start', handleStartInteraction);
       controls.removeEventListener('end', handleEndInteraction);
       domElem.removeEventListener('pointerdown', handlePointerDown);
@@ -483,8 +503,33 @@ export default function GlobeView({ onSelectRegion, floatsCount = 0 }) {
         }`}
       />
 
-      {/* 3D Three.js Globe Viewport */}
-      <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      {/* 3D Viewport: Aceternity 3D Globe or Standard Three.js Globe */}
+      {useAceternityGlobe ? (
+        <div className="w-full h-full">
+          <Globe3D
+            markers={ACETERNITY_MARKERS}
+            className="w-full h-full"
+            config={{
+              showAtmosphere: false,
+              atmosphereIntensity: 0,
+              bumpScale: 3,
+              autoRotateSpeed: 0.35,
+              enableZoom: true,
+              enablePan: false,
+              radius: 2.2,
+            }}
+            onMarkerClick={(marker) => {
+              console.log("Clicked marker:", marker.label);
+              if (marker.label === "Bay of Bengal EEZ") {
+                handleEnterDomain(activeDomainTile.id);
+              }
+            }}
+          />
+
+        </div>
+      ) : (
+        <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      )}
 
       {/* Top Header Badge */}
       <div className="absolute top-6 left-6 z-10 flex items-center gap-3.5 glass-panel px-4 py-2.5 rounded-2xl shadow-glass border border-ocean-border">
@@ -499,14 +544,24 @@ export default function GlobeView({ onSelectRegion, floatsCount = 0 }) {
         </div>
       </div>
 
-      {/* Top Right Navigation Hint */}
-      <div className="absolute top-6 right-6 z-10 glass-panel px-4 py-2.5 rounded-2xl text-xs font-mono text-cyan-300 shadow-glass flex items-center gap-2 border border-ocean-border">
-        <Compass className="w-4 h-4 text-cyan-400" />
-        <span>Rotate Globe • Click Marker to Explore</span>
+      {/* Top Right Controls & Hints */}
+      <div className="absolute top-6 right-6 z-10 flex items-center gap-3">
+        <button
+          onClick={() => setUseAceternityGlobe(!useAceternityGlobe)}
+          className="glass-panel px-3.5 py-2 rounded-2xl text-xs font-mono text-cyan-300 hover:text-white border border-ocean-border shadow-glass flex items-center gap-2 transition-all hover:border-cyan-400"
+        >
+          <Sparkles className="w-4 h-4 text-cyan-400" />
+          <span>{useAceternityGlobe ? "Aceternity 3D Globe" : "Standard Globe"}</span>
+        </button>
+        <div className="glass-panel px-4 py-2 rounded-2xl text-xs font-mono text-cyan-300 shadow-glass flex items-center gap-2 border border-ocean-border">
+          <Compass className="w-4 h-4 text-cyan-400" />
+          <span>Rotate Globe • Click Marker to Explore</span>
+        </div>
       </div>
 
-      {/* Precise Geographic Marker Attached Label (Compact Scientific Tag) */}
-      {screenPos.visible && (
+
+      {/* Precise Geographic Marker Attached Label (Compact Scientific Tag for Standard Mode) */}
+      {screenPos.visible && !useAceternityGlobe && (
         <div
           style={{
             left: `${screenPos.x}px`,
@@ -516,6 +571,7 @@ export default function GlobeView({ onSelectRegion, floatsCount = 0 }) {
           className="absolute z-20 cursor-pointer transition-transform duration-200 hover:scale-105"
           onClick={() => handleEnterDomain(activeDomainTile.id)}
         >
+
           <div className="bg-ocean-deep/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-cyan-400/60 shadow-2xl flex items-center gap-2.5">
             <div className="w-5 h-5 rounded-lg bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center text-cyan-300">
               <Navigation className="w-3 h-3" />

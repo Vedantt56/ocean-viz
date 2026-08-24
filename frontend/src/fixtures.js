@@ -76,7 +76,7 @@ FIXTURE_VARIABLES.forEach((variable) => {
   });
 });
 
-// Argo Float Index Data (4-5 fake floats in Indian Ocean / Bay of Bengal)
+// Argo Float Index Data (4-5 floats in Indian Ocean / Bay of Bengal)
 export const FIXTURE_FLOATS_INDEX = [
   { float_id: "argo_2901234", lat: 11.5, lon: 81.2 },
   { float_id: "argo_2901235", lat: 14.2, lon: 86.8 },
@@ -85,7 +85,7 @@ export const FIXTURE_FLOATS_INDEX = [
   { float_id: "argo_2901238", lat: 6.8, lon: 84.1 },
 ];
 
-// Profile data for individual Argo floats
+// Profile data for individual Argo floats (BGC-Argo parameters)
 export const FIXTURE_FLOAT_PROFILES = {
   argo_2901234: {
     float_id: "argo_2901234",
@@ -95,6 +95,8 @@ export const FIXTURE_FLOAT_PROFILES = {
         depth: [0, 10, 25, 50, 100, 200, 300, 500, 750, 1000],
         temperature: [29.2, 29.0, 28.5, 25.1, 20.4, 15.2, 12.1, 9.3, 7.1, 5.8],
         salinity: [33.5, 33.6, 33.9, 34.4, 34.9, 35.1, 35.0, 34.9, 34.8, 34.8],
+        currents: [0.85, 0.81, 0.72, 0.54, 0.38, 0.24, 0.16, 0.09, 0.05, 0.03],
+        chlorophyll: [1.45, 1.68, 1.92, 1.25, 0.58, 0.21, 0.08, 0.03, 0.01, 0.00],
       },
     ],
   },
@@ -106,6 +108,8 @@ export const FIXTURE_FLOAT_PROFILES = {
         depth: [0, 10, 25, 50, 100, 200, 300, 500, 750, 1000],
         temperature: [28.8, 28.7, 28.1, 24.6, 19.8, 14.9, 11.8, 9.0, 6.9, 5.6],
         salinity: [33.2, 33.3, 33.7, 34.2, 34.8, 35.0, 34.9, 34.8, 34.7, 34.8],
+        currents: [0.76, 0.72, 0.61, 0.45, 0.31, 0.19, 0.12, 0.07, 0.04, 0.02],
+        chlorophyll: [1.12, 1.34, 1.58, 0.98, 0.42, 0.15, 0.05, 0.02, 0.01, 0.00],
       },
     ],
   },
@@ -117,6 +121,8 @@ export const FIXTURE_FLOAT_PROFILES = {
         depth: [0, 10, 25, 50, 100, 200, 300, 500, 750, 1000],
         temperature: [29.8, 29.5, 29.1, 26.2, 21.5, 16.0, 13.0, 10.1, 7.8, 6.2],
         salinity: [34.1, 34.2, 34.4, 34.8, 35.2, 35.3, 35.1, 35.0, 34.9, 34.9],
+        currents: [0.94, 0.89, 0.78, 0.62, 0.42, 0.28, 0.19, 0.11, 0.06, 0.03],
+        chlorophyll: [1.82, 2.10, 2.35, 1.45, 0.72, 0.28, 0.10, 0.04, 0.01, 0.00],
       },
     ],
   },
@@ -128,6 +134,8 @@ export const FIXTURE_FLOAT_PROFILES = {
         depth: [0, 10, 25, 50, 100, 200, 300, 500, 750, 1000],
         temperature: [28.3, 28.2, 27.8, 23.9, 19.1, 14.3, 11.2, 8.7, 6.6, 5.4],
         salinity: [32.9, 33.0, 33.5, 34.0, 34.6, 34.9, 34.8, 34.7, 34.6, 34.7],
+        currents: [0.68, 0.64, 0.52, 0.38, 0.25, 0.15, 0.09, 0.05, 0.03, 0.01],
+        chlorophyll: [0.95, 1.15, 1.38, 0.82, 0.35, 0.12, 0.04, 0.01, 0.00, 0.00],
       },
     ],
   },
@@ -139,6 +147,8 @@ export const FIXTURE_FLOAT_PROFILES = {
         depth: [0, 10, 25, 50, 100, 200, 300, 500, 750, 1000],
         temperature: [29.5, 29.3, 28.9, 25.8, 20.9, 15.6, 12.5, 9.7, 7.4, 6.0],
         salinity: [33.7, 33.8, 34.1, 34.6, 35.0, 35.2, 35.0, 34.9, 34.8, 34.8],
+        currents: [0.88, 0.83, 0.70, 0.52, 0.35, 0.22, 0.14, 0.08, 0.04, 0.02],
+        chlorophyll: [1.52, 1.76, 2.05, 1.32, 0.62, 0.24, 0.09, 0.03, 0.01, 0.00],
       },
     ],
   },

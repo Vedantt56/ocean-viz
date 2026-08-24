@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+
 
 import ControlPanel from './components/ControlPanel.jsx';
 
@@ -63,10 +64,12 @@ export default function App() {
     getDepths(activeVariable)
       .then((depths) => {
         if (Array.isArray(depths) && depths.length > 0) {
-          setAvailableDepths(depths);
-          if (!depths.includes(activeDepth)) {
-            setActiveDepth(depths[0]);
+          const numDepths = depths.map(Number);
+          setAvailableDepths(numDepths);
+          if (!numDepths.includes(Number(activeDepth))) {
+            setActiveDepth(numDepths[0]);
           }
+
         }
       })
       .catch((err) => console.error('[App] Error fetching depths metadata:', err));
@@ -94,34 +97,65 @@ export default function App() {
     setLoading(true);
     const depthsToFetch = availableDepths;
     const fetchPromises = depthsToFetch.map((d) => getField(activeVariable, d, activeTime));
-    Promise.all(fetchPromises)
-      .then((slices) => {
+    Promise.allSettled(fetchPromises)
+      .then((results) => {
         if (!isSubscribed) return;
-        setSlicesData(slices);
+        const validSlices = results
+          .filter((res) => res.status === 'fulfilled' && res.value)
+          .map((res) => res.value);
+        setSlicesData(validSlices);
         setLoading(false);
       })
       .catch((err) => {
         if (isSubscribed) setLoading(false);
       });
+
     return () => {
       isSubscribed = false;
     };
   }, [activeVariable, availableDepths, activeTime]);
 
-  const handleFloatSelect = (floatId) => {
+  const handleFloatSelect = useCallback((floatId) => {
     console.log(`[App] Selected float: ${floatId}`);
     getFloatProfile(floatId)
       .then((profile) => setSelectedFloatProfile(profile))
       .catch((err) => console.error(`[App] Error fetching profile for ${floatId}:`, err));
-  };
+  }, []);
+
 
   const handleResetRange = () => {
     setMinOverride(null);
     setMaxOverride(null);
   };
 
-  const effectiveMin = minOverride !== null ? minOverride : valueRange.min;
-  const effectiveMax = maxOverride !== null ? maxOverride : valueRange.max;
+  let activeSliceMin = null;
+  let activeSliceMax = null;
+
+  if (scaleMode === 'local' && slicesData?.length) {
+    const activeSlice = slicesData.find((s) => Number(s.depth) === Number(activeDepth)) || slicesData[0];
+    if (activeSlice?.values?.length) {
+      let min = Infinity;
+      let max = -Infinity;
+      activeSlice.values.forEach((row) => {
+        row.forEach((val) => {
+          if (Number.isFinite(val)) {
+            min = Math.min(min, val);
+            max = Math.max(max, val);
+          }
+        });
+      });
+      if (min !== Infinity && min !== max) {
+        activeSliceMin = min;
+        activeSliceMax = max;
+      }
+    }
+  }
+
+
+
+  const effectiveMin = minOverride !== null ? minOverride : (activeSliceMin !== null ? activeSliceMin : valueRange.min);
+  const effectiveMax = maxOverride !== null ? maxOverride : (activeSliceMax !== null ? activeSliceMax : valueRange.max);
+
 
   // 2. Render Globe View if view === "globe"
   if (view === "globe") {
@@ -194,8 +228,17 @@ export default function App() {
           sliceOpacity={sliceOpacity}
         />
 
-        {/* Mode Switcher Pill (Slices / Volume / Isosurface) */}
-        <div className="absolute bottom-16 left-6 z-30 flex items-center gap-1 p-1 rounded-xl bg-ocean-panel/90 backdrop-blur-xl border border-ocean-border shadow-2xl">
+        {/* Top Center Segmented Date Slider */}
+        <TimeControl
+          timesteps={timesteps}
+          activeTime={activeTime}
+          onSelectTime={setActiveTime}
+          isPlaying={isPlaying}
+          onTogglePlay={setIsPlaying}
+        />
+
+        {/* Mode Switcher Pill (Stacked Slices / Volumetric Stack / Isosurface) */}
+        <div className="absolute bottom-6 left-6 z-30 flex items-center gap-1 p-1 rounded-xl bg-ocean-panel/90 backdrop-blur-xl border border-ocean-border shadow-2xl">
           {[
             { id: 'slices', label: 'Stacked Slices' },
             { id: 'volume', label: 'Volumetric Stack' },
@@ -215,15 +258,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* Timeline Control Bar */}
-        <TimeControl
-          timesteps={timesteps}
-          activeTime={activeTime}
-          onSelectTime={setActiveTime}
-          isPlaying={isPlaying}
-          onTogglePlay={setIsPlaying}
-        />
-
         {/* Scientific Colormap Legend */}
         <Legend
           variable={activeVariable}
@@ -232,13 +266,16 @@ export default function App() {
           palette={palette}
         />
 
+
         {/* Argo Profile Readout Panel */}
         {selectedFloatProfile && (
           <ProfilePanel
             profileData={selectedFloatProfile}
+            activeVariable={activeVariable}
             onClose={() => setSelectedFloatProfile(null)}
           />
         )}
+
       </main>
     </div>
   );

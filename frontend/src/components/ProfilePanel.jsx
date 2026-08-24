@@ -1,8 +1,46 @@
-import React, { useState } from 'react';
-import { X, Activity, Thermometer, Droplet, Radio, Compass, Clock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Activity, Thermometer, Droplet, Radio, Compass, Clock, Zap, Leaf } from 'lucide-react';
 
-export default function ProfilePanel({ profileData, onClose }) {
-  const [activeMetric, setActiveMetric] = useState('temperature'); // 'temperature' or 'salinity'
+const METRIC_CONFIG = {
+  temperature: {
+    label: 'Temp',
+    fullLabel: 'Temperature (°C)',
+    color: '#ff6b00',
+    bgClass: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+    icon: Thermometer,
+  },
+  salinity: {
+    label: 'Salinity',
+    fullLabel: 'Salinity (PSU)',
+    color: '#00d2ff',
+    bgClass: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
+    icon: Droplet,
+  },
+  currents: {
+    label: 'Currents',
+    fullLabel: 'Current Speed (m/s)',
+    color: '#38bdf8',
+    bgClass: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
+    icon: Zap,
+  },
+  chlorophyll: {
+    label: 'Chl-a',
+    fullLabel: 'Chlorophyll-a (mg/m³)',
+    color: '#10b981',
+    bgClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+    icon: Leaf,
+  },
+};
+
+export default function ProfilePanel({ profileData, activeVariable = 'temperature', onClose }) {
+  const [activeMetric, setActiveMetric] = useState(activeVariable);
+
+  useEffect(() => {
+    if (activeVariable && METRIC_CONFIG[activeVariable]) {
+      setActiveMetric(activeVariable);
+    }
+  }, [activeVariable, profileData]);
+
 
   if (!profileData || !profileData.profiles || profileData.profiles.length === 0) {
     return null;
@@ -10,9 +48,9 @@ export default function ProfilePanel({ profileData, onClose }) {
 
   const latestProfile = profileData.profiles[0];
   const depthArray = latestProfile.depth || [];
-  const valueArray = latestProfile[activeMetric] || [];
+  const valueArray = latestProfile[activeMetric] || latestProfile.temperature || [];
 
-  const floatId = profileData.float_id;
+  const floatId = String(profileData.float_id || 'argo_2901234').replace(/^argo_?/i, '#');
   const time = latestProfile.time || 'Latest Cycle';
   const lat = latestProfile.lat ?? (profileData.lat || '15.42°N');
   const lon = latestProfile.lon ?? (profileData.lon || '88.15°E');
@@ -25,8 +63,8 @@ export default function ProfilePanel({ profileData, onClose }) {
   const innerHeight = height - margin.top - margin.bottom;
 
   // Min / Max calculation for X axis
-  let minVal = Math.min(...valueArray);
-  let maxVal = Math.max(...valueArray);
+  let minVal = Math.min(...(valueArray.length ? valueArray : [0]));
+  let maxVal = Math.max(...(valueArray.length ? valueArray : [1]));
   if (minVal === maxVal) {
     minVal -= 1;
     maxVal += 1;
@@ -45,7 +83,8 @@ export default function ProfilePanel({ profileData, onClose }) {
   // Build SVG Path string
   const polylinePoints = depthArray
     .map((d, i) => {
-      const x = scaleX(valueArray[i]);
+      const val = valueArray[i] !== undefined ? valueArray[i] : minVal;
+      const x = scaleX(val);
       const y = scaleY(d);
       return `${x},${y}`;
     })
@@ -53,23 +92,24 @@ export default function ProfilePanel({ profileData, onClose }) {
 
   const depthTicks = [0, 200, 400, 600, 800, 1000].filter((d) => d <= maxDepth);
   const xStep = valRange / 4;
-  const xTicks = Array.from({ length: 5 }, (_, i) => parseFloat((minVal + i * xStep).toFixed(1)));
+  const xTicks = Array.from({ length: 5 }, (_, i) => parseFloat((minVal + i * xStep).toFixed(2)));
 
-  const metricLabel = activeMetric === 'temperature' ? 'Temperature (°C)' : 'Salinity (PSU)';
-  const lineStrokeColor = activeMetric === 'temperature' ? '#ff6b00' : '#00d2ff';
+  const currentConfig = METRIC_CONFIG[activeMetric] || METRIC_CONFIG.temperature;
+  const metricLabel = currentConfig.fullLabel;
+  const lineStrokeColor = currentConfig.color;
 
   return (
-    <aside className="absolute top-4 right-4 bottom-4 w-92 glass-panel border border-ocean-border rounded-2xl p-5 flex flex-col z-30 shadow-glass animate-in slide-in-from-right duration-300 font-sans">
+    <aside className="absolute top-4 right-4 bottom-4 w-96 glass-panel border border-ocean-border rounded-2xl p-5 flex flex-col z-30 shadow-glass animate-in slide-in-from-right duration-300 font-sans">
       {/* Instrument Readout Header */}
       <div className="flex justify-between items-start pb-3.5 border-b border-ocean-border/60 mb-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Radio className="w-4 h-4 text-cyan-400 animate-pulse" />
             <span className="text-[10px] font-mono text-cyan-300 font-bold uppercase tracking-wider bg-cyan-950/70 border border-cyan-800/60 px-2 py-0.5 rounded-md">
-              LIVE ARGO OBSERVATION
+              BGC-ARGO TELEMETRY FEED
             </span>
           </div>
-          <h3 className="text-base font-bold text-white font-mono tracking-wide">{floatId}</h3>
+          <h3 className="text-base font-bold text-white font-mono tracking-wide">ARGO FLOAT {floatId}</h3>
           <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono mt-1">
             <span className="flex items-center gap-1">
               <Compass className="w-3 h-3 text-slate-500" /> {lat}, {lon}
@@ -88,30 +128,26 @@ export default function ProfilePanel({ profileData, onClose }) {
         </button>
       </div>
 
-      {/* Metric Toggle Tabs */}
-      <div className="flex bg-ocean-deep/70 p-1 rounded-xl border border-ocean-border/60 mb-4">
-        <button
-          onClick={() => setActiveMetric('temperature')}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-mono font-semibold flex items-center justify-center gap-1.5 transition-all duration-200 ${
-            activeMetric === 'temperature'
-              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Thermometer className="w-3.5 h-3.5" />
-          Temperature
-        </button>
-        <button
-          onClick={() => setActiveMetric('salinity')}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-mono font-semibold flex items-center justify-center gap-1.5 transition-all duration-200 ${
-            activeMetric === 'salinity'
-              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Droplet className="w-3.5 h-3.5" />
-          Salinity
-        </button>
+      {/* 4 BGC-Argo Metric Toggle Tabs */}
+      <div className="grid grid-cols-4 bg-ocean-deep/70 p-1 rounded-xl border border-ocean-border/60 mb-4 gap-1">
+        {Object.entries(METRIC_CONFIG).map(([key, item]) => {
+          const Icon = item.icon;
+          const isActive = activeMetric === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveMetric(key)}
+              className={`py-1.5 px-1 rounded-lg text-[10px] font-mono font-semibold flex items-center justify-center gap-1 transition-all duration-200 ${
+                isActive
+                  ? `${item.bgClass} border shadow-sm`
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+              }`}
+            >
+              <Icon className="w-3 h-3" />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Observation vs Model Indicator Legend */}
@@ -234,7 +270,8 @@ export default function ProfilePanel({ profileData, onClose }) {
 
           {/* Data Point Circles */}
           {depthArray.map((d, i) => {
-            const cx = scaleX(valueArray[i]);
+            const val = valueArray[i] !== undefined ? valueArray[i] : minVal;
+            const cx = scaleX(val);
             const cy = scaleY(d);
             return (
               <circle
@@ -246,7 +283,7 @@ export default function ProfilePanel({ profileData, onClose }) {
                 stroke="#070f21"
                 strokeWidth="1.5"
               >
-                <title>{`Depth: ${d}m | ${activeMetric}: ${valueArray[i]}`}</title>
+                <title>{`Depth: ${d}m | ${activeMetric}: ${val}`}</title>
               </circle>
             );
           })}
@@ -256,9 +293,8 @@ export default function ProfilePanel({ profileData, onClose }) {
       {/* Footer Info Readout */}
       <div className="mt-3 text-[10px] text-slate-400 text-center font-mono tracking-tight flex items-center justify-center gap-1.5">
         <Activity className="w-3 h-3 text-cyan-400" />
-        <span>Source: Global Data Assembly Center (GDAC) Argo Telemetry Feed</span>
+        <span>Source: Global Data Assembly Center (GDAC) BGC-Argo Telemetry Feed</span>
       </div>
     </aside>
   );
 }
-
