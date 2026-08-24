@@ -19,6 +19,8 @@ env/
 # Node / Frontend dependencies & builds
 frontend/node_modules/
 frontend/dist/
+package-lock.json
+frontend/package-lock.json
 
 # OS / Editor files
 .DS_Store
