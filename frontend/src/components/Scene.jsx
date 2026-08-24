@@ -164,11 +164,14 @@ function createRealTileGroup(slice, props, effectiveRange) {
   const indexDistance = Math.abs(sliceIndex - activeIndex);
   const range = effectiveRange.max - effectiveRange.min || 1;
   const baseOpacity = sliceOpacity ?? 0.9;
-  const depthStrengths = [0.98, 0.68, 0.48, 0.36, 0.26];
-  const focus = depthStrengths[Math.min(indexDistance, depthStrengths.length - 1)];
-  const layerOpacity = renderMode === 'volume'
-    ? baseOpacity * Math.min(0.78, focus * 0.82)
-    : baseOpacity * focus;
+  // Stacked Slices mode: keep every tile clearly visible; only a mild lift for the active one
+  const sliceStrengths = [1.0, 0.30, 0.16, 0.10, 0.07];
+  // Volumetric mode: intentionally more see-through so you can peer through the stack
+  const volumeStrengths = [0.92, 0.42, 0.26, 0.18, 0.13];
+  const focus = renderMode === 'volume'
+    ? volumeStrengths[Math.min(indexDistance, volumeStrengths.length - 1)]
+    : sliceStrengths[Math.min(indexDistance, sliceStrengths.length - 1)];
+  const layerOpacity = baseOpacity * focus;
 
   let ptr = 0;
   for (let iz = 0; iz <= segmentsZ; iz += 1) {
@@ -388,9 +391,9 @@ function createRealTileGroup(slice, props, effectiveRange) {
     perimeterTopPoints[0].clone(),
   ]);
   const frameMaterial = new THREE.LineBasicMaterial({
-    color: isSelected ? 0x00f0ff : 0x1d3d52,
+    color: isSelected ? 0x00f0ff : 0x2c5a78,
     transparent: true,
-    opacity: isSelected ? 0.85 : 0.22,
+    opacity: isSelected ? 0.85 : 0.45,
   });
   const frameLine = new THREE.Line(frameGeometry, frameMaterial);
 
@@ -444,7 +447,8 @@ function animateTileTransitions(sliceTilesMap, depthGuidesGroup, props) {
   const sortedDepths = [...availableDepths].sort((a, b) => a - b);
   const activeIndex = Math.max(0, sortedDepths.indexOf(activeDepth));
   const baseOpacity = sliceOpacity ?? 0.92;
-  const depthStrengths = [0.98, 0.68, 0.48, 0.36, 0.26];
+  const sliceStrengths = [1.0, 0.30, 0.16, 0.10, 0.07];
+  const volumeStrengths = [0.92, 0.42, 0.26, 0.18, 0.13];
 
   sliceTilesMap.forEach((tileGroup, depth) => {
     const sliceIndex = Math.max(0, sortedDepths.indexOf(depth));
@@ -453,10 +457,10 @@ function animateTileTransitions(sliceTilesMap, depthGuidesGroup, props) {
     const depthY = getDepthYPosition(depth, availableDepths, verticalExaggeration);
 
     const targetY = isSelected ? depthY + 0.22 : depthY;
-    const focus = depthStrengths[Math.min(indexDistance, depthStrengths.length - 1)];
-    const targetOpacity = renderMode === 'volume'
-      ? baseOpacity * Math.min(0.78, focus * 0.82)
-      : baseOpacity * focus;
+    const focus = renderMode === 'volume'
+      ? volumeStrengths[Math.min(indexDistance, volumeStrengths.length - 1)]
+      : sliceStrengths[Math.min(indexDistance, sliceStrengths.length - 1)];
+    const targetOpacity = baseOpacity * focus;
     const targetBoost = isSelected ? 0.24 : 0.0;
     const targetScale = isSelected ? 1.015 : 1.0;
 
@@ -485,8 +489,8 @@ function animateTileTransitions(sliceTilesMap, depthGuidesGroup, props) {
           animData.bottomMesh.material.opacity = animData.currentOpacity * 0.6;
         }
         if (animData.frameLine?.material) {
-          animData.frameLine.material.opacity = isSelected ? 0.85 : 0.22;
-          animData.frameLine.material.color.setHex(isSelected ? 0x00f0ff : 0x1d3d52);
+          animData.frameLine.material.opacity = isSelected ? 0.85 : 0.45;
+          animData.frameLine.material.color.setHex(isSelected ? 0x00f0ff : 0x2c5a78);
         }
         if (animData.bottomFrameLine?.material) {
           animData.bottomFrameLine.material.opacity = isSelected ? 0.45 : 0.12;

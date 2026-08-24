@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+
 import ColorbarEditor from './ColorbarEditor.jsx';
-import { X, Info, Sliders, Layers, Eye, ChevronDown, ChevronUp } from 'lucide-react';
+
+import { X, Info, Sliders, Layers, Eye, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const VARIABLES = [
   { id: 'temperature', name: 'Temperature', unit: '°C', color: 'from-amber-500 to-rose-500' },
@@ -33,9 +35,9 @@ export default function ControlPanel({
 }) {
   const [showNotice, setShowNotice] = useState(true);
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   const depthLevels = availableDepths && availableDepths.length > 0 ? availableDepths : [activeDepth || 0];
-
 
   const handleVariableToggle = (varId) => {
     console.log(`[ControlPanel] Selected variable: ${varId}`);
@@ -52,8 +54,31 @@ export default function ControlPanel({
     ? depthLevels.indexOf(activeDepth)
     : 0;
 
+  if (isCollapsed) {
+    return (
+      <aside className="w-12 glass-panel border-r border-ocean-border flex flex-col items-center py-4 z-20 shadow-glass">
+        <button
+          onClick={() => setIsCollapsed(false)}
+          className="w-8 h-8 flex items-center justify-center rounded-lg border border-ocean-border/60 text-cyan-300 hover:bg-cyan-500/10 hover:border-cyan-400/60 transition-colors"
+          title="Expand Panel"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+        <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-cyan-glow mt-5" />
+      </aside>
+    );
+  }
+
   return (
-    <aside className="w-80 glass-panel border-r border-ocean-border p-4.5 flex flex-col gap-4 z-20 shadow-glass overflow-y-auto font-sans">
+    <aside className="w-80 glass-panel border-r border-ocean-border p-4.5 flex flex-col gap-4 z-20 shadow-glass overflow-y-auto font-sans relative">
+      <button
+        onClick={() => setIsCollapsed(true)}
+        className="absolute top-3 right-3 w-6 h-6 flex items-center justify-center rounded-md border border-ocean-border/60 text-slate-400 hover:text-cyan-300 hover:border-cyan-400/60 transition-colors"
+        title="Collapse Panel"
+      >
+        <ChevronLeft className="w-3.5 h-3.5" />
+      </button>
+
       {/* Header Bar */}
       <div className="pb-3.5 border-b border-ocean-border/60">
         <div className="flex items-center gap-2mb-1">
@@ -111,7 +136,6 @@ export default function ControlPanel({
             {activeDepth}m
           </span>
         </h2>
-
         <div className="bg-ocean-deep/60 border border-ocean-border/60 rounded-xl p-3 flex flex-col gap-2.5">
           <input
             type="range"
@@ -122,7 +146,6 @@ export default function ControlPanel({
             onChange={handleSliderChange}
             className="w-full accent-cyan-400 bg-slate-800 h-2 rounded-lg cursor-pointer"
           />
-
           <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 px-1 pt-1">
             {depthLevels.length <= 6 ? (
               depthLevels.map((d) => (
@@ -180,7 +203,6 @@ export default function ControlPanel({
           </span>
           {isAdvancedOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
-
         {isAdvancedOpen && (
           <div className="mt-2 bg-ocean-deep/60 border border-ocean-border/60 rounded-xl p-3 flex flex-col gap-3 text-xs font-mono animate-in fade-in duration-200">
             {/* Vertical Exaggeration Slider */}
@@ -239,4 +261,3 @@ export default function ControlPanel({
     </aside>
   );
 }
-

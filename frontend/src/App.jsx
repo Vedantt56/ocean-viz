@@ -1,17 +1,24 @@
 import React, { useState, useEffect } from 'react';
+
 import ControlPanel from './components/ControlPanel.jsx';
+
 import Scene from './components/Scene.jsx';
+
 import Legend from './components/Legend.jsx';
+
 import ProfilePanel from './components/ProfilePanel.jsx';
+
 import TimeControl from './components/TimeControl.jsx';
+
 import GlobeView from './components/GlobeView.jsx';
+
 import { Globe, Layers, Eye, RefreshCw } from 'lucide-react';
+
 import { getField, getDepths, getFloats, getFloatProfile, getTimesteps } from './api.js';
 
 export default function App() {
   // 1. View Routing State: "globe" or "region"
   const [view, setView] = useState("globe");
-
   const [activeVariable, setActiveVariable] = useState('currents');
   const [activeDepth, setActiveDepth] = useState(0);
   const [availableDepths, setAvailableDepths] = useState([0, 50, 100, 200, 500, 1000, 2000, 3000, 3992]);
@@ -20,13 +27,12 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
 
   // Colorbar & Scene Control State
-  const [palette, setPalette] = useState('thermal');
+  const [palette, setPalette] = useState('ocean');
   const [scaleMode, setScaleMode] = useState('linear');
   const [minOverride, setMinOverride] = useState(null);
   const [maxOverride, setMaxOverride] = useState(null);
   const [verticalExaggeration, setVerticalExaggeration] = useState(1.0);
   const [sliceOpacity, setSliceOpacity] = useState(0.92);
-
   const [slicesData, setSlicesData] = useState([]);
   const [floatsData, setFloatsData] = useState([]);
   const [selectedFloatProfile, setSelectedFloatProfile] = useState(null);
@@ -37,10 +43,10 @@ export default function App() {
   const [renderMode, setRenderMode] = useState("slices");
 
   const VARIABLE_RANGES = {
-    currents: { min: 0.0, max: 0.85, palette: 'thermal' },
+    currents: { min: 0.0, max: 0.85, palette: 'flow' },
     temperature: { min: 12.0, max: 31.0, palette: 'thermal' },
-    salinity: { min: 30.0, max: 35.5, palette: 'viridis' },
-    chlorophyll: { min: 0.05, max: 3.50, palette: 'viridis' },
+    salinity: { min: 30.0, max: 35.5, palette: 'haline' },
+    chlorophyll: { min: 0.05, max: 3.50, palette: 'algae' },
   };
 
   // Sync colorbar range and palette per variable
@@ -84,13 +90,10 @@ export default function App() {
   // Fetch depth level slices from backend when variable, availableDepths, or time changes
   useEffect(() => {
     if (!availableDepths || availableDepths.length === 0) return;
-
     let isSubscribed = true;
     setLoading(true);
-
     const depthsToFetch = availableDepths;
     const fetchPromises = depthsToFetch.map((d) => getField(activeVariable, d, activeTime));
-
     Promise.all(fetchPromises)
       .then((slices) => {
         if (!isSubscribed) return;
@@ -100,7 +103,6 @@ export default function App() {
       .catch((err) => {
         if (isSubscribed) setLoading(false);
       });
-
     return () => {
       isSubscribed = false;
     };
@@ -241,4 +243,3 @@ export default function App() {
     </div>
   );
 }
-

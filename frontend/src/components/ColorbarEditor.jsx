@@ -1,4 +1,5 @@
 import React from 'react';
+
 import { Palette, Sliders, RotateCcw } from 'lucide-react';
 
 export default function ColorbarEditor({
@@ -30,7 +31,6 @@ export default function ColorbarEditor({
           <RotateCcw className="w-3 h-3" /> Auto
         </button>
       </div>
-
       {/* Palette Selection Dropdown */}
       <div className="flex flex-col gap-1">
         <label className="text-[11px] text-slate-400 font-medium">Palette Preset</label>
@@ -39,12 +39,15 @@ export default function ColorbarEditor({
           onChange={(e) => onSelectPalette(e.target.value)}
           className="bg-ocean-panel border border-ocean-border/80 text-xs text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-400 cursor-pointer"
         >
-          <option value="thermal">Thermal (Blue → Red)</option>
+          <option value="thermal">Thermal (Temperature)</option>
+          <option value="flow">Flow (Currents)</option>
+          <option value="haline">Haline (Salinity)</option>
+          <option value="algae">Algae (Chlorophyll)</option>
+          <option value="ocean">Ocean (Neutral Blue-Gray)</option>
           <option value="viridis">Viridis (Colorblind Safe)</option>
           <option value="coolwarm">Coolwarm (Diverging)</option>
         </select>
       </div>
-
       {/* Scaling Mode Toggle (Linear vs Log) */}
       <div className="flex justify-between items-center bg-ocean-panel/80 p-1 rounded-lg border border-ocean-border/60">
         <span className="text-[11px] text-slate-400 font-medium pl-2">Scale Mode</span>
@@ -71,7 +74,6 @@ export default function ColorbarEditor({
           </button>
         </div>
       </div>
-
       {/* Min / Max Range Numeric Overrides */}
       <div className="flex gap-2">
         <div className="flex-1 flex flex-col gap-1">
