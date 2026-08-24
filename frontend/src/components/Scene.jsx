@@ -6,50 +6,89 @@ import { evaluateColormapValue } from '../utils/colormaps.js';
 // Increased vertical spacing between depth planes for visual clarity (Prompt F15)
 const DEPTH_Y_MAPPING = {
   0: 0.0,
-  50: -3.0,
-  100: -6.0,
-  200: -9.0,
-  500: -12.0,
+  50: -1.8,
+  100: -3.6,
+  150: -4.5, // Visual filler slice between 100m and 200m
+  200: -5.4,
+  300: -6.3, // Visual filler slice between 200m and 500m
+  400: -7.2, // Visual filler slice between 200m and 500m
+  500: -8.1,
 };
 
-// Procedural noise generator for realistic 3D seafloor bathymetry terrain
+// Explicit Vertical Clearance & Crust Placement Constants (Prompt F31 & F33)
+const DEEPEST_SLICE_Y_POS = -8.1;         // Y position of 500m deepest slice
+const MIN_CRUST_CLEARANCE_MARGIN = 2.5;    // Guaranteed 2.5 unit gap between lowest slice & highest crust peak
+const MAX_CRUST_NOISE_AMPLITUDE = 1.8;     // Rich 1.8 unit 3D terrain height variation
+const CRUST_BOX_HEIGHT = 5.0;              // Thickness of solid crust BoxGeometry
+// Calculated Crust Base Position Y: -8.1 - 2.5 - 1.8 - 2.5 = -14.9Y
+const CALCULATED_CRUST_Y_POS = DEEPEST_SLICE_Y_POS - (CRUST_BOX_HEIGHT / 2.0) - MAX_CRUST_NOISE_AMPLITUDE - MIN_CRUST_CLEARANCE_MARGIN;
+
+// Procedural multi-octave noise generator for realistic 3D seafloor bathymetry terrain (Prompt F33)
 function getSeafloorHeight(x, z) {
   const d = Math.sqrt(x * x + z * z);
-  const trench = Math.sin(x * 0.4) * Math.cos(z * 0.4) * 1.2;
-  const ridge = Math.cos(d * 0.5) * 0.8;
-  const continentalSlope = (x + 8) * 0.25;
-  return -14.5 + trench + ridge + continentalSlope;
+  // Multi-octave 3D terrain noise for dramatic mountain ridges & ocean trenches
+  const n1 = Math.sin(x * 0.5) * Math.cos(z * 0.5) * 0.8;
+  const n2 = Math.cos(d * 0.6) * 0.6;
+  const n3 = Math.sin(x * 1.2 + z * 0.8) * 0.4;
+  const rawHeight = n1 + n2 + n3 + 0.9;
+
+  // STRICT CLAMP to [0 .. MAX_CRUST_NOISE_AMPLITUDE] (max 1.8 height units)
+  return Math.max(0.0, Math.min(MAX_CRUST_NOISE_AMPLITUDE, rawHeight));
 }
 
-// Generate realistic dark ocean bed texture with hillshading and sediment details
-function createSeafloorTexture() {
+
+
+// Generate solid 3D geological crust block geometry (Box with displaced top surface - Prompt F29)
+function createSolidCrustGeometry() {
+  // Box geometry: 16 wide (X), 5 deep (Y), 16 long (Z), with 64x64 top grid
+  const geo = new THREE.BoxGeometry(16, CRUST_BOX_HEIGHT, 16, 64, 1, 64);
+  const pos = geo.attributes.position;
+
+  for (let i = 0; i < pos.count; i++) {
+    const vx = pos.getX(i);
+    const vy = pos.getY(i);
+    const vz = pos.getZ(i);
+
+    // Displace top face vertices (vy > 0) to form organic 3D terrain peaks & valleys
+    if (vy > 0.1) {
+      const terrainHeight = getSeafloorHeight(vx, vz);
+      pos.setY(i, vy + terrainHeight);
+    }
+  }
+
+  geo.computeVertexNormals();
+  geo.computeBoundingBox();
+  return geo;
+}
+
+// Generate realistic geological earth crust texture (muted browns/tans with rock grain & strata - Prompt F29)
+function createEarthCrustTexture() {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 512;
   const ctx = canvas.getContext('2d');
 
-  ctx.fillStyle = '#060d1a';
+  // Base muted brown earth color
+  ctx.fillStyle = '#2d231c';
   ctx.fillRect(0, 0, 512, 512);
 
-  // Subtle sand/rock sediment texture pattern
-  for (let i = 0; i < 4000; i++) {
+  // Rock sediment strata layers
+  for (let y = 0; y < 512; y += 4) {
+    const shade = Math.floor(35 + Math.sin(y * 0.08) * 15 + Math.random() * 10);
+    ctx.fillStyle = `rgba(${shade + 30}, ${shade + 20}, ${shade + 10}, 0.5)`;
+    ctx.fillRect(0, y, 512, 3 + Math.random() * 3);
+  }
+
+  // Rock speckles & grain texture
+  for (let i = 0; i < 5000; i++) {
     const x = Math.random() * 512;
     const y = Math.random() * 512;
-    const radius = Math.random() * 3 + 1;
-    const shade = Math.floor(Math.random() * 35 + 10);
-    ctx.fillStyle = `rgba(${shade}, ${shade + 15}, ${shade + 35}, 0.25)`;
+    const radius = Math.random() * 2 + 0.5;
+    const shade = Math.floor(Math.random() * 45 + 15);
+    ctx.fillStyle = `rgba(${shade + 40}, ${shade + 25}, ${shade + 10}, 0.3)`;
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fill();
-  }
-
-  // Contour lines on seafloor
-  ctx.strokeStyle = 'rgba(0, 210, 255, 0.12)';
-  ctx.lineWidth = 1.5;
-  for (let r = 20; r < 250; r += 25) {
-    ctx.beginPath();
-    ctx.arc(256, 256, r, 0, Math.PI * 2);
-    ctx.stroke();
   }
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -58,6 +97,8 @@ function createSeafloorTexture() {
   texture.repeat.set(2, 2);
   return texture;
 }
+
+
 
 // Generate satellite coastline surface texture overlay (Top plane at 0m)
 function createCoastlineSurfaceCanvas(ncols, nrows, values, minVal, maxVal, palette, scaleMode) {
@@ -268,39 +309,30 @@ export default function Scene({
     cyanRimLight.position.set(-15, -10, -15);
     scene.add(cyanRimLight);
 
-    // 🌊 3D Sea Bed / Underwater Bathymetry Terrain Mesh
-    const geo = new THREE.PlaneGeometry(16, 16, 64, 64);
-    geo.rotateX(-Math.PI / 2);
-
-    const pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const vx = pos.getX(i);
-      const vz = pos.getZ(i);
-      const vy = getSeafloorHeight(vx, vz);
-      pos.setY(i, vy);
-    }
-    geo.computeVertexNormals();
-
-    const seafloorMat = new THREE.MeshStandardMaterial({
-      map: createSeafloorTexture(),
-      roughness: 0.85,
-      metalness: 0.15,
-      flatShading: true,
-      side: THREE.DoubleSide,
+    // 🪨 Solid Geological Earth Crust Block (Prompt F29)
+    const crustGeo = createSolidCrustGeometry();
+    const crustMat = new THREE.MeshStandardMaterial({
+      map: createEarthCrustTexture(),
+      color: 0x4a3c31, // Muted geological rock brown/tan
+      roughness: 0.90,
+      metalness: 0.10,
+      flatShading: false,
     });
-    const seafloorMesh = new THREE.Mesh(geo, seafloorMat);
-    seafloorMesh.receiveShadow = true;
-    scene.add(seafloorMesh);
+    const crustMesh = new THREE.Mesh(crustGeo, crustMat);
+    crustMesh.position.set(0, CALCULATED_CRUST_Y_POS, 0); // Guaranteed 2.0 unit clearance beneath deepest slice
+    crustMesh.receiveShadow = true;
+    scene.add(crustMesh);
 
     // 📦 Glass Bounding Box Guide Lines
     const boundingGroup = new THREE.Group();
     scene.add(boundingGroup);
 
-    const boxGeo = new THREE.BoxGeometry(12, 13.5, 12);
+    const boxGeo = new THREE.BoxGeometry(12, 14.5, 12);
     const boxEdges = new THREE.EdgesGeometry(boxGeo);
     const boxMat = new THREE.LineBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.25 });
     const boxMesh = new THREE.LineSegments(boxEdges, boxMat);
-    boxMesh.position.set(0, -6.0, 0);
+    boxMesh.position.set(0, -6.5, 0);
+
     boundingGroup.add(boxMesh);
 
     // Depth Labels Group (Dynamic Leader Lines terminating at plane edges)
@@ -455,7 +487,6 @@ export default function Scene({
         <div>
           Variable: <span className="text-white font-bold tracking-wide">{activeVariable.toUpperCase()}</span>
         </div>
-        <div className="w-px h-4 bg-slate-700" />
         <div>
           Isolated Depth: <span className="text-cyan-400 font-bold">{activeDepth}m</span>
         </div>
@@ -464,7 +495,146 @@ export default function Scene({
   );
 }
 
-// 🛠️ Helper: Render Stacked 3D Slice Heatmaps with Crisp Borders & Adjacent-Only Focus (Prompt F15)
+
+// 🛠️ Helper: Generate displaced 3D BufferGeometry for 12x12 depth slices (Prompt F28 & F30)
+function createDisplacedSliceGeometry(depth, values, effectiveMin, effectiveMax) {
+  // 64x64 subdivisions give 65x65 = 4,225 vertices across 12x12 footprint
+  const geo = new THREE.PlaneGeometry(12, 12, 64, 64);
+  const pos = geo.attributes.position;
+
+  // Depth-appropriate displacement amplitude scaling:
+  const amplitudeMap = { 0: 0.50, 50: 0.35, 100: 0.22, 150: 0.18, 200: 0.14, 300: 0.11, 400: 0.09, 500: 0.08 };
+  const amplitude = amplitudeMap[depth] ?? Math.max(0.06, 0.50 * Math.exp(-depth / 150.0));
+
+  const nrows = values ? values.length : 0;
+  const ncols = values && values[0] ? values[0].length : 0;
+  const range = effectiveMax - effectiveMin || 1.0;
+
+  for (let i = 0; i < pos.count; i++) {
+    const vx = pos.getX(i); // Local X [-6 .. +6]
+    const vy = pos.getY(i); // Local Y [-6 .. +6]
+
+    // 1. Organic multi-octave wave noise across 12x12 surface
+    const n1 = Math.sin(vx * 0.7 + vy * 0.5) * Math.cos(vy * 0.6 - vx * 0.4);
+    const n2 = Math.sin(vx * 1.5 - vy * 1.2) * 0.4 * Math.cos(vx * 1.1 + vy * 1.3);
+    const organicNoise = (n1 + n2) * 0.5;
+
+    // 2. Real field data influence (if values grid available)
+    let dataNormalized = 0.5;
+    if (nrows > 0 && ncols > 0) {
+      const u = Math.max(0, Math.min(1.0, (vx + 6.0) / 12.0));
+      const v = Math.max(0, Math.min(1.0, (vy + 6.0) / 12.0));
+      const rIdx = Math.max(0, Math.min(nrows - 1, Math.floor((1.0 - v) * nrows)));
+      const cIdx = Math.max(0, Math.min(ncols - 1, Math.floor(u * ncols)));
+      const rawVal = values[rIdx][cIdx];
+      if (rawVal !== null && rawVal !== undefined && !isNaN(rawVal)) {
+        dataNormalized = Math.max(0, Math.min(1.0, (rawVal - effectiveMin) / range));
+      }
+    }
+
+    // Blend: 40% real field data + 60% organic wave noise
+    const blendedRelief = (dataNormalized - 0.5) * 0.8 + organicNoise * 0.6;
+    const zDisplacement = blendedRelief * amplitude;
+    pos.setZ(i, zDisplacement);
+  }
+
+  geo.computeVertexNormals();
+  geo.computeBoundingBox();
+  return geo;
+}
+
+// 🛠️ Helper: Extract outer 12x12 perimeter loop
+function createPerimeterBorderGeometry(displacedGeo, gridX = 64, gridY = 64) {
+  const pos = displacedGeo.attributes.position;
+  const numCols = gridX + 1;
+  const numRows = gridY + 1;
+
+  const points = [];
+
+  for (let c = 0; c < numCols; c++) {
+    points.push(new THREE.Vector3(pos.getX(c), pos.getY(c), pos.getZ(c)));
+  }
+  for (let r = 1; r < numRows; r++) {
+    const idx = r * numCols + (numCols - 1);
+    points.push(new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)));
+  }
+  for (let c = numCols - 2; c >= 0; c--) {
+    const idx = (numRows - 1) * numCols + c;
+    points.push(new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)));
+  }
+  for (let r = numRows - 2; r >= 1; r--) {
+    const idx = r * numCols;
+    points.push(new THREE.Vector3(pos.getX(idx), pos.getY(idx), pos.getZ(idx)));
+  }
+
+  return new THREE.BufferGeometry().setFromPoints(points);
+}
+
+// 🛠️ Helper: Render Subsurface Real Data Slice Canvas
+function createSubsurfaceSliceCanvas(ncols, nrows, values, effectiveMin, effectiveMax, palette, scaleMode) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+
+  const rawCanvas = document.createElement('canvas');
+  rawCanvas.width = ncols;
+  rawCanvas.height = nrows;
+  const rawCtx = rawCanvas.getContext('2d');
+  const imgData = rawCtx.createImageData(ncols, nrows);
+
+  for (let r = 0; r < nrows; r++) {
+    for (let c = 0; c < ncols; c++) {
+      const val = values[r][c];
+      const [red, green, blue, alpha] = evaluateColormapValue(val, effectiveMin, effectiveMax, palette, scaleMode);
+      const idx = (r * ncols + c) * 4;
+      imgData.data[idx] = red;
+      imgData.data[idx + 1] = green;
+      imgData.data[idx + 2] = blue;
+      imgData.data[idx + 3] = alpha;
+    }
+  }
+  rawCtx.putImageData(imgData, 0, 0);
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(rawCanvas, 0, 0, 512, 512);
+
+  // Isolines overlay inside real data region
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+  ctx.lineWidth = 1;
+  for (let y = 30; y < 512; y += 40) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(512, y);
+    ctx.stroke();
+  }
+
+  return canvas;
+}
+
+// 🛠️ Helper: Render Desaturated Vertical Filler Slice Canvas (Visual-only gap filler)
+function createFillerSliceCanvas() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+
+  // Muted desaturated slate-blue tint
+  ctx.fillStyle = '#08172c';
+  ctx.fillRect(0, 0, 256, 256);
+
+  ctx.strokeStyle = 'rgba(0, 210, 255, 0.08)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 256; i += 32) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 256); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(256, i); ctx.stroke();
+  }
+
+  return canvas;
+}
+
+// 🛠️ Helper: Render Stacked 3D Slice Heatmaps with Multi-Layer Visibility & Vertical Filler Slices (Prompt F30 Revised)
 function rebuildSlicesMesh(slicesGroup, depthLabelsGroup, props) {
   const { slicesData, activeDepth, palette, scaleMode, minOverride, maxOverride, renderMode } = props;
   if (!slicesGroup || !slicesData || slicesData.length === 0) return;
@@ -493,13 +663,10 @@ function rebuildSlicesMesh(slicesGroup, depthLabelsGroup, props) {
     }
   }
 
-  // Sort unique available depths ascending
   const availableDepths = slicesData
     .map((s) => s.depth)
     .filter((d, i, arr) => arr.indexOf(d) === i)
     .sort((a, b) => a - b);
-
-  const activeIndex = availableDepths.indexOf(activeDepth);
 
   let globalMin = Infinity;
   let globalMax = -Infinity;
@@ -523,37 +690,16 @@ function rebuildSlicesMesh(slicesGroup, depthLabelsGroup, props) {
   const effectiveMin = minOverride !== null ? minOverride : globalMin;
   const effectiveMax = maxOverride !== null ? maxOverride : globalMax;
 
-  const planeGeo = new THREE.PlaneGeometry(12, 12, 32, 32);
-  const borderGeo = new THREE.EdgesGeometry(new THREE.PlaneGeometry(12, 12));
-
+  // 1. Render REAL Data Slices (All visible simultaneously with depth stack opacities)
   slicesData.forEach((slice) => {
     const { depth, values } = slice;
     if (!values) return;
 
-    const sliceIndex = availableDepths.indexOf(depth);
     const isSelected = depth === activeDepth;
-    const isAdjacent = activeIndex !== -1 && Math.abs(sliceIndex - activeIndex) === 1;
 
-    // F15 Rule 1: Only render active depth slice at high opacity (~0.92) + 2 adjacent depths at low opacity (~0.10)
-    let opacity = 0.0;
-    let isVisible = false;
-
-    if (isSelected) {
-      opacity = 0.92;
-      isVisible = true;
-    } else if (isAdjacent) {
-      opacity = 0.10; // Spatial context slice
-      isVisible = true;
-    } else {
-      // Hide all non-adjacent distant depth planes
-      opacity = 0.0;
-      isVisible = false;
-    }
-
-    if (renderMode === 'volume') {
-      opacity = 0.70;
-      isVisible = true;
-    }
+    // Multi-Layer Stack Visibility Rule: Selected slice is high-opacity (0.92), all other real slices are translucent (0.38)
+    let opacity = isSelected ? 0.92 : 0.38;
+    if (renderMode === 'volume') opacity = 0.70;
 
     const nrows = values.length;
     const ncols = values[0].length;
@@ -563,85 +709,49 @@ function rebuildSlicesMesh(slicesGroup, depthLabelsGroup, props) {
       const surfCanvas = createCoastlineSurfaceCanvas(ncols, nrows, values, effectiveMin, effectiveMax, palette, scaleMode);
       texture = new THREE.CanvasTexture(surfCanvas);
     } else {
-      const canvas = document.createElement('canvas');
-      canvas.width = 256;
-      canvas.height = 256;
-      const ctx = canvas.getContext('2d');
-
-      const rawCanvas = document.createElement('canvas');
-      rawCanvas.width = ncols;
-      rawCanvas.height = nrows;
-      const rawCtx = rawCanvas.getContext('2d');
-      const imgData = rawCtx.createImageData(ncols, nrows);
-
-      for (let r = 0; r < nrows; r++) {
-        for (let c = 0; c < ncols; c++) {
-          const val = values[r][c];
-          const [red, green, blue, alpha] = evaluateColormapValue(val, effectiveMin, effectiveMax, palette, scaleMode);
-          const idx = (r * ncols + c) * 4;
-          imgData.data[idx] = red;
-          imgData.data[idx + 1] = green;
-          imgData.data[idx + 2] = blue;
-          imgData.data[idx + 3] = alpha;
-        }
-      }
-      rawCtx.putImageData(imgData, 0, 0);
-
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(rawCanvas, 0, 0, 256, 256);
-
-      // White scientific isolines overlay
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-      ctx.lineWidth = 1;
-      for (let y = 20; y < 256; y += 40) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(256, y);
-        ctx.stroke();
-      }
-
-      texture = new THREE.CanvasTexture(canvas);
+      const subCanvas = createSubsurfaceSliceCanvas(ncols, nrows, values, effectiveMin, effectiveMax, palette, scaleMode);
+      texture = new THREE.CanvasTexture(subCanvas);
     }
 
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
 
-    // F15 Depth Material: depthWrite: false for clean stacked transparency
+    // 12x12 Displaced Wavy Geometry (Prompt F28)
+    const sliceGeo = createDisplacedSliceGeometry(depth, values, effectiveMin, effectiveMax);
+    const borderGeo = createPerimeterBorderGeometry(sliceGeo, 64, 64);
+
     const material = new THREE.MeshStandardMaterial({
       map: texture,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: opacity,
       depthWrite: false,
-      roughness: 0.3,
-      metalness: 0.1,
+      roughness: 0.35,
+      metalness: 0.15,
     });
 
-    const mesh = new THREE.Mesh(planeGeo, material);
+    const mesh = new THREE.Mesh(sliceGeo, material);
     mesh.rotation.x = -Math.PI / 2;
-    mesh.visible = isVisible;
+    mesh.visible = true;
 
     const yPos = DEPTH_Y_MAPPING[depth] ?? (-depth * 0.024);
     mesh.position.set(0, yPos, 0);
 
-    // F15 Rule 2: Crisp, high-contrast wireframe border around EVERY visible plane
-    if (isVisible) {
-      const borderMat = new THREE.LineBasicMaterial({
-        color: isSelected ? 0x00ffff : 0x00d2ff,
-        transparent: true,
-        opacity: isSelected ? 0.95 : 0.50,
-      });
-      const borderLine = new THREE.LineSegments(borderGeo, borderMat);
-      mesh.add(borderLine);
-    }
+    // Border Outline Loop (Selected = Bright Cyan 0.98 opacity, Other Real Slices = Clean Blue 0.55 opacity)
+    const borderMat = new THREE.LineBasicMaterial({
+      color: isSelected ? 0x00ffff : 0x00aacc,
+      transparent: true,
+      opacity: isSelected ? 0.98 : 0.55,
+    });
+    const borderLine = new THREE.LineLoop(borderGeo, borderMat);
+    mesh.add(borderLine);
 
     slicesGroup.add(mesh);
 
-    // F15 Rule 4: Leader lines terminating EXACTLY at plane edge (x = 6.0) + Depth Callout Labels
-    if (depthLabelsGroup && isVisible) {
+    // Leader Line & Depth Label Callout
+    if (depthLabelsGroup) {
       const lineGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(6.0, yPos, 0.0), // Terminates exactly at right edge of plane
+        new THREE.Vector3(6.0, yPos, 0.0),
         new THREE.Vector3(7.4, yPos, 0.0),
       ]);
       const lineMat = new THREE.LineBasicMaterial({
@@ -653,7 +763,7 @@ function rebuildSlicesMesh(slicesGroup, depthLabelsGroup, props) {
 
       const labelText = `${depth}m`;
       const spriteMat = new THREE.SpriteMaterial({
-        map: createDepthLabelTexture(labelText, isSelected, isAdjacent),
+        map: createDepthLabelTexture(labelText, isSelected, !isSelected),
         transparent: true,
         opacity: isSelected ? 1.0 : 0.75,
       });
@@ -662,6 +772,44 @@ function rebuildSlicesMesh(slicesGroup, depthLabelsGroup, props) {
       sprite.scale.set(1.8, 0.9, 1);
       depthLabelsGroup.add(sprite);
     }
+  });
+
+  // 2. Render VERTICAL FILLER SLICES between wide depth gaps (150m, 300m, 400m)
+  const fillerDepths = [150, 300, 400];
+  const fillerTexture = new THREE.CanvasTexture(createFillerSliceCanvas());
+  fillerTexture.minFilter = THREE.LinearFilter;
+
+  fillerDepths.forEach((fDepth) => {
+    const yPos = DEPTH_Y_MAPPING[fDepth];
+    if (yPos === undefined) return;
+
+    // Displaced wavy geometry using F28 organic wave noise (no real data)
+    const fillerGeo = createDisplacedSliceGeometry(fDepth, null, 0, 1);
+    const fillerBorderGeo = createPerimeterBorderGeometry(fillerGeo, 64, 64);
+
+    const fillerMat = new THREE.MeshStandardMaterial({
+      map: fillerTexture,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.18, // Desaturated visual-only context filler
+      depthWrite: false,
+      roughness: 0.45,
+      metalness: 0.10,
+    });
+
+    const fillerMesh = new THREE.Mesh(fillerGeo, fillerMat);
+    fillerMesh.rotation.x = -Math.PI / 2;
+    fillerMesh.position.set(0, yPos, 0);
+
+    const borderMat = new THREE.LineBasicMaterial({
+      color: 0x1a365d,
+      transparent: true,
+      opacity: 0.25,
+    });
+    const borderLine = new THREE.LineLoop(fillerBorderGeo, borderMat);
+    fillerMesh.add(borderLine);
+
+    slicesGroup.add(fillerMesh);
   });
 }
 
