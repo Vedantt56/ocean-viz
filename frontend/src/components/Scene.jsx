@@ -3,12 +3,13 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { evaluateColormapValue } from '../utils/colormaps.js';
 
+// Increased vertical spacing between depth planes for visual clarity (Prompt F15)
 const DEPTH_Y_MAPPING = {
   0: 0.0,
-  50: -1.8,
-  100: -3.6,
-  200: -5.4,
-  500: -7.2,
+  50: -3.0,
+  100: -6.0,
+  200: -9.0,
+  500: -12.0,
 };
 
 // Procedural noise generator for realistic 3D seafloor bathymetry terrain
@@ -17,7 +18,7 @@ function getSeafloorHeight(x, z) {
   const trench = Math.sin(x * 0.4) * Math.cos(z * 0.4) * 1.2;
   const ridge = Math.cos(d * 0.5) * 0.8;
   const continentalSlope = (x + 8) * 0.25;
-  return -10.2 + trench + ridge + continentalSlope;
+  return -14.5 + trench + ridge + continentalSlope;
 }
 
 // Generate realistic dark ocean bed texture with hillshading and sediment details
@@ -27,7 +28,7 @@ function createSeafloorTexture() {
   canvas.height = 512;
   const ctx = canvas.getContext('2d');
 
-  ctx.fillStyle = '#0a1628';
+  ctx.fillStyle = '#060d1a';
   ctx.fillRect(0, 0, 512, 512);
 
   // Subtle sand/rock sediment texture pattern
@@ -35,15 +36,15 @@ function createSeafloorTexture() {
     const x = Math.random() * 512;
     const y = Math.random() * 512;
     const radius = Math.random() * 3 + 1;
-    const shade = Math.floor(Math.random() * 40 + 15);
-    ctx.fillStyle = `rgba(${shade}, ${shade + 20}, ${shade + 40}, 0.25)`;
+    const shade = Math.floor(Math.random() * 35 + 10);
+    ctx.fillStyle = `rgba(${shade}, ${shade + 15}, ${shade + 35}, 0.25)`;
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fill();
   }
 
   // Contour lines on seafloor
-  ctx.strokeStyle = 'rgba(0, 210, 255, 0.15)';
+  ctx.strokeStyle = 'rgba(0, 210, 255, 0.12)';
   ctx.lineWidth = 1.5;
   for (let r = 20; r < 250; r += 25) {
     ctx.beginPath();
@@ -125,25 +126,48 @@ function createCoastlineSurfaceCanvas(ncols, nrows, values, minVal, maxVal, pale
   return canvas;
 }
 
-// 3D Depth Scale Labels Text Canvas generator
-function createDepthLabelTexture(text) {
+// 3D Depth Scale Labels Text Canvas generator (High-contrast callout badges)
+function createDepthLabelTexture(text, isSelected, isAdjacent) {
   const canvas = document.createElement('canvas');
-  canvas.width = 128;
+  canvas.width = 140;
   canvas.height = 64;
   const ctx = canvas.getContext('2d');
 
-  ctx.fillStyle = 'rgba(11, 19, 37, 0.85)';
-  ctx.roundRect(4, 4, 120, 56, 8);
-  ctx.fill();
-  ctx.strokeStyle = '#00d2ff';
-  ctx.lineWidth = 2;
-  ctx.stroke();
+  if (isSelected) {
+    ctx.fillStyle = 'rgba(0, 210, 255, 0.9)';
+    ctx.roundRect(4, 4, 132, 56, 10);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
 
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 24px monospace';
+    ctx.fillStyle = '#040d1a';
+    ctx.font = 'bold 26px monospace';
+  } else if (isAdjacent) {
+    ctx.fillStyle = 'rgba(11, 19, 37, 0.85)';
+    ctx.roundRect(4, 4, 132, 56, 8);
+    ctx.fill();
+    ctx.strokeStyle = '#00d2ff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = '#00ffff';
+    ctx.font = 'bold 22px monospace';
+  } else {
+    ctx.fillStyle = 'rgba(8, 14, 28, 0.65)';
+    ctx.roundRect(4, 4, 132, 56, 8);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 210, 255, 0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '20px monospace';
+  }
+
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, 64, 32);
+  ctx.fillText(text, 70, 32);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
@@ -168,7 +192,7 @@ export default function Scene({
   const rendererRef = useRef(null);
   const slicesGroupRef = useRef(null);
   const floatsGroupRef = useRef(null);
-  const boundingBoxGroupRef = useRef(null);
+  const depthLabelsGroupRef = useRef(null);
 
   // Store current props in ref for instantaneous remount rendering
   const propsRef = useRef({
@@ -206,12 +230,12 @@ export default function Scene({
     const height = container.clientHeight || window.innerHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x060b17);
-    scene.fog = new THREE.FogExp2(0x060b17, 0.025);
+    scene.background = new THREE.Color(0x040814);
+    scene.fog = new THREE.FogExp2(0x040814, 0.02);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 1000);
-    camera.position.set(15, 12, 22);
+    camera.position.set(16, 13, 23);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -229,18 +253,18 @@ export default function Scene({
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.target.set(0, -4.5, 0);
+    controls.target.set(0, -6.0, 0);
 
     // 💡 Cinematic Lighting Setup
-    const ambientLight = new THREE.AmbientLight(0xd0e8ff, 0.8);
+    const ambientLight = new THREE.AmbientLight(0xd0e8ff, 0.85);
     scene.add(ambientLight);
 
-    const mainSun = new THREE.DirectionalLight(0xffffff, 1.2);
+    const mainSun = new THREE.DirectionalLight(0xffffff, 1.25);
     mainSun.position.set(15, 25, 15);
     mainSun.castShadow = true;
     scene.add(mainSun);
 
-    const cyanRimLight = new THREE.DirectionalLight(0x00ffff, 0.7);
+    const cyanRimLight = new THREE.DirectionalLight(0x00ffff, 0.75);
     cyanRimLight.position.set(-15, -10, -15);
     scene.add(cyanRimLight);
 
@@ -268,47 +292,21 @@ export default function Scene({
     seafloorMesh.receiveShadow = true;
     scene.add(seafloorMesh);
 
-    // 📦 Volumetric Glass Bounding Box & 3D Depth Scale Ruler
+    // 📦 Glass Bounding Box Guide Lines
     const boundingGroup = new THREE.Group();
     scene.add(boundingGroup);
-    boundingBoxGroupRef.current = boundingGroup;
 
-    // Glass bounding volume wireframe
-    const boxGeo = new THREE.BoxGeometry(12, 10.5, 12);
+    const boxGeo = new THREE.BoxGeometry(12, 13.5, 12);
     const boxEdges = new THREE.EdgesGeometry(boxGeo);
-    const boxMat = new THREE.LineBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.35 });
+    const boxMat = new THREE.LineBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.25 });
     const boxMesh = new THREE.LineSegments(boxEdges, boxMat);
-    boxMesh.position.set(0, -5.25, 0);
+    boxMesh.position.set(0, -6.0, 0);
     boundingGroup.add(boxMesh);
 
-    // Vertical Depth Axis Pillar & Ticks (0m -> 5500m)
-    const depthTicks = [
-      { depth: 0, label: '0m', y: 0.0 },
-      { depth: 50, label: '1000m', y: -1.8 },
-      { depth: 100, label: '2000m', y: -3.6 },
-      { depth: 200, label: '4000m', y: -5.4 },
-      { depth: 500, label: '5500m', y: -7.2 },
-    ];
-
-    depthTicks.forEach(({ label, y }) => {
-      // Axis tick mark line
-      const lineGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(6.0, y, 6.0),
-        new THREE.Vector3(6.5, y, 6.0),
-      ]);
-      const lineMat = new THREE.LineBasicMaterial({ color: 0x00ffff });
-      boundingGroup.add(new THREE.Line(lineGeo, lineMat));
-
-      // Label Sprite
-      const spriteMat = new THREE.SpriteMaterial({
-        map: createDepthLabelTexture(label),
-        transparent: true,
-      });
-      const sprite = new THREE.Sprite(spriteMat);
-      sprite.position.set(7.2, y, 6.0);
-      sprite.scale.set(1.6, 0.8, 1);
-      boundingGroup.add(sprite);
-    });
+    // Depth Labels Group (Dynamic Leader Lines terminating at plane edges)
+    const depthLabelsGroup = new THREE.Group();
+    scene.add(depthLabelsGroup);
+    depthLabelsGroupRef.current = depthLabelsGroup;
 
     // Mesh Groups for Slices & Argo Floats
     const slicesGroup = new THREE.Group();
@@ -319,8 +317,8 @@ export default function Scene({
     scene.add(floatsGroup);
     floatsGroupRef.current = floatsGroup;
 
-    // Direct render call upon mount to prevent empty scene when returning from Globe View
-    rebuildSlicesMesh(slicesGroup, propsRef.current);
+    // Initial Mesh Assembly
+    rebuildSlicesMesh(slicesGroup, depthLabelsGroup, propsRef.current);
     rebuildFloatsMesh(floatsGroup, propsRef.current);
 
     // Raycasting Event Handling
@@ -370,7 +368,7 @@ export default function Scene({
     domElem.addEventListener('pointerdown', handlePointerDown);
     domElem.addEventListener('pointermove', handlePointerMove);
 
-    // Animation Loop
+    // Animation Loop with Dynamic Back-to-Front Render Order Sorting
     let animationFrameId;
     let animTime = 0;
     const animate = () => {
@@ -381,6 +379,20 @@ export default function Scene({
       if (floatsGroupRef.current) {
         floatsGroupRef.current.children.forEach((marker) => {
           marker.position.y += Math.sin(animTime * 2.5 + marker.position.x) * 0.002;
+        });
+      }
+
+      // 1. Dynamic Per-Frame Camera Distance Render Order Sorting for Transparent Slices
+      if (slicesGroupRef.current && cameraRef.current) {
+        const camPos = cameraRef.current.position;
+        const sliceMeshes = [...slicesGroupRef.current.children];
+        sliceMeshes.sort((a, b) => {
+          const distA = a.position.distanceTo(camPos);
+          const distB = b.position.distanceTo(camPos);
+          return distB - distA; // Descending: furthest mesh first (lowest renderOrder)
+        });
+        sliceMeshes.forEach((mesh, index) => {
+          mesh.renderOrder = index;
         });
       }
 
@@ -412,8 +424,8 @@ export default function Scene({
 
   // 2. Rebuild Slices Effect on Prop Updates
   useEffect(() => {
-    if (slicesGroupRef.current) {
-      rebuildSlicesMesh(slicesGroupRef.current, {
+    if (slicesGroupRef.current && depthLabelsGroupRef.current) {
+      rebuildSlicesMesh(slicesGroupRef.current, depthLabelsGroupRef.current, {
         slicesData,
         activeDepth,
         activeVariable,
@@ -452,11 +464,12 @@ export default function Scene({
   );
 }
 
-// 🛠️ Helper: Render Stacked 3D Slice Heatmaps & Topography
-function rebuildSlicesMesh(slicesGroup, props) {
+// 🛠️ Helper: Render Stacked 3D Slice Heatmaps with Crisp Borders & Adjacent-Only Focus (Prompt F15)
+function rebuildSlicesMesh(slicesGroup, depthLabelsGroup, props) {
   const { slicesData, activeDepth, palette, scaleMode, minOverride, maxOverride, renderMode } = props;
   if (!slicesGroup || !slicesData || slicesData.length === 0) return;
 
+  // Clear Slices Group
   while (slicesGroup.children.length > 0) {
     const obj = slicesGroup.children[0];
     slicesGroup.remove(obj);
@@ -466,6 +479,27 @@ function rebuildSlicesMesh(slicesGroup, props) {
       obj.material.dispose();
     }
   }
+
+  // Clear Depth Labels Group
+  if (depthLabelsGroup) {
+    while (depthLabelsGroup.children.length > 0) {
+      const obj = depthLabelsGroup.children[0];
+      depthLabelsGroup.remove(obj);
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        if (obj.material.map) obj.material.map.dispose();
+        obj.material.dispose();
+      }
+    }
+  }
+
+  // Sort unique available depths ascending
+  const availableDepths = slicesData
+    .map((s) => s.depth)
+    .filter((d, i, arr) => arr.indexOf(d) === i)
+    .sort((a, b) => a - b);
+
+  const activeIndex = availableDepths.indexOf(activeDepth);
 
   let globalMin = Infinity;
   let globalMax = -Infinity;
@@ -490,21 +524,45 @@ function rebuildSlicesMesh(slicesGroup, props) {
   const effectiveMax = maxOverride !== null ? maxOverride : globalMax;
 
   const planeGeo = new THREE.PlaneGeometry(12, 12, 32, 32);
+  const borderGeo = new THREE.EdgesGeometry(new THREE.PlaneGeometry(12, 12));
 
   slicesData.forEach((slice) => {
     const { depth, values } = slice;
     if (!values) return;
+
+    const sliceIndex = availableDepths.indexOf(depth);
+    const isSelected = depth === activeDepth;
+    const isAdjacent = activeIndex !== -1 && Math.abs(sliceIndex - activeIndex) === 1;
+
+    // F15 Rule 1: Only render active depth slice at high opacity (~0.92) + 2 adjacent depths at low opacity (~0.10)
+    let opacity = 0.0;
+    let isVisible = false;
+
+    if (isSelected) {
+      opacity = 0.92;
+      isVisible = true;
+    } else if (isAdjacent) {
+      opacity = 0.10; // Spatial context slice
+      isVisible = true;
+    } else {
+      // Hide all non-adjacent distant depth planes
+      opacity = 0.0;
+      isVisible = false;
+    }
+
+    if (renderMode === 'volume') {
+      opacity = 0.70;
+      isVisible = true;
+    }
 
     const nrows = values.length;
     const ncols = values[0].length;
 
     let texture;
     if (depth === 0) {
-      // 🛰️ Surface plane gets high-res satellite coastline topography + heatmaps
       const surfCanvas = createCoastlineSurfaceCanvas(ncols, nrows, values, effectiveMin, effectiveMax, palette, scaleMode);
       texture = new THREE.CanvasTexture(surfCanvas);
     } else {
-      // Interpolated colormap canvas for subsurface depth slices
       const canvas = document.createElement('canvas');
       canvas.width = 256;
       canvas.height = 256;
@@ -549,37 +607,61 @@ function rebuildSlicesMesh(slicesGroup, props) {
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
 
-    const isSelected = depth === activeDepth;
-
-    let opacity = isSelected ? 0.95 : 0.45;
-    if (renderMode === 'volume') opacity = 0.75;
-    if (renderMode === 'isosurface') opacity = isSelected ? 0.9 : 0.2;
-
+    // F15 Depth Material: depthWrite: false for clean stacked transparency
     const material = new THREE.MeshStandardMaterial({
       map: texture,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: opacity,
-      depthWrite: isSelected,
+      depthWrite: false,
       roughness: 0.3,
       metalness: 0.1,
     });
 
     const mesh = new THREE.Mesh(planeGeo, material);
     mesh.rotation.x = -Math.PI / 2;
+    mesh.visible = isVisible;
 
-    const yPos = DEPTH_Y_MAPPING[depth] ?? (-depth * 0.015);
+    const yPos = DEPTH_Y_MAPPING[depth] ?? (-depth * 0.024);
     mesh.position.set(0, yPos, 0);
 
-    // Selected depth glow outline box frame
-    if (isSelected) {
-      const edges = new THREE.EdgesGeometry(planeGeo);
-      const edgeMat = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 2 });
-      const lineMesh = new THREE.LineSegments(edges, edgeMat);
-      mesh.add(lineMesh);
+    // F15 Rule 2: Crisp, high-contrast wireframe border around EVERY visible plane
+    if (isVisible) {
+      const borderMat = new THREE.LineBasicMaterial({
+        color: isSelected ? 0x00ffff : 0x00d2ff,
+        transparent: true,
+        opacity: isSelected ? 0.95 : 0.50,
+      });
+      const borderLine = new THREE.LineSegments(borderGeo, borderMat);
+      mesh.add(borderLine);
     }
 
     slicesGroup.add(mesh);
+
+    // F15 Rule 4: Leader lines terminating EXACTLY at plane edge (x = 6.0) + Depth Callout Labels
+    if (depthLabelsGroup && isVisible) {
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(6.0, yPos, 0.0), // Terminates exactly at right edge of plane
+        new THREE.Vector3(7.4, yPos, 0.0),
+      ]);
+      const lineMat = new THREE.LineBasicMaterial({
+        color: isSelected ? 0x00ffff : 0x00aacc,
+        transparent: true,
+        opacity: isSelected ? 0.95 : 0.55,
+      });
+      depthLabelsGroup.add(new THREE.Line(lineGeo, lineMat));
+
+      const labelText = `${depth}m`;
+      const spriteMat = new THREE.SpriteMaterial({
+        map: createDepthLabelTexture(labelText, isSelected, isAdjacent),
+        transparent: true,
+        opacity: isSelected ? 1.0 : 0.75,
+      });
+      const sprite = new THREE.Sprite(spriteMat);
+      sprite.position.set(8.2, yPos, 0.0);
+      sprite.scale.set(1.8, 0.9, 1);
+      depthLabelsGroup.add(sprite);
+    }
   });
 }
 
@@ -612,14 +694,14 @@ function rebuildFloatsMesh(floatsGroup, props) {
     markerGroup.userData = { float_id };
 
     // 1. Vertical Laser Column to Ocean Floor
-    const laserGeo = new THREE.CylinderGeometry(0.02, 0.02, 10.5, 8);
+    const laserGeo = new THREE.CylinderGeometry(0.02, 0.02, 14.5, 8);
     const laserMat = new THREE.MeshBasicMaterial({
       color: 0x00ffff,
       transparent: true,
       opacity: 0.5,
     });
     const laserMesh = new THREE.Mesh(laserGeo, laserMat);
-    laserMesh.position.y = -5.25;
+    laserMesh.position.y = -7.25;
     laserMesh.userData = { float_id };
     markerGroup.add(laserMesh);
 
