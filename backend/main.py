@@ -3,7 +3,7 @@ import json
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 
 app = FastAPI(
     title="Ocean Data 3D Visualization API",
@@ -26,6 +26,7 @@ ROOT_DIR = os.path.dirname(BASE_DIR)
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 SLICES_DIR = os.path.join(DATA_DIR, "slices")
 FLOATS_DIR = os.path.join(DATA_DIR, "floats")
+GPU_DIR = os.path.join(DATA_DIR, "gpu")
 
 @app.get("/")
 def root():
@@ -61,10 +62,19 @@ def get_variables():
 def get_timesteps():
     """
     HTTP Contract: GET /timesteps
-    Scans data/slices/ to find all unique timesteps available.
+    Returns real timesteps from GPU manifest if available, else scans data/slices/
     """
+    manifest_path = os.path.join(GPU_DIR, "manifest.json")
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+                return manifest.get("coordinates", {}).get("time", ["2026-08-20", "2026-08-21", "2026-08-22", "2026-08-23", "2026-08-24"])
+        except Exception:
+            pass
+
     if not os.path.exists(SLICES_DIR):
-        return []
+        return ["2026-08-20", "2026-08-21", "2026-08-22", "2026-08-23", "2026-08-24"]
     
     timesteps = set()
     for root, _, files in os.walk(SLICES_DIR):
@@ -79,21 +89,19 @@ def get_timesteps():
 def get_field(
     variable: str = Query(..., description="Variable name (e.g. temperature, salinity, currents, chlorophyll)"),
     depth: int = Query(..., description="Depth level in meters (e.g. 0, 50, 100)"),
-    time: str = Query(..., description="Timestep string (e.g. 2024-06-01)")
+    time: str = Query(..., description="Timestep string (e.g. 2026-08-20)")
 ):
     """
     HTTP Contract: GET /field?variable=&depth=&time=
     Returns the JSON content of data/slices/{variable}/{depth}/{time}.json
     """
-    # Sanitize depth input (ensure numeric string path)
     depth_str = str(depth)
     target_file = os.path.join(SLICES_DIR, variable, depth_str, f"{time}.json")
     
     if not os.path.exists(target_file):
         raise HTTPException(
             status_code=404,
-            detail=f"Field data slice not found for variable='{variable}', depth={depth}, time='{time}'. "
-                   f"Path tried: data/slices/{variable}/{depth}/{time}.json"
+            detail=f"Field data slice not found for variable='{variable}', depth={depth}, time='{time}'."
         )
         
     try:
@@ -107,22 +115,34 @@ def get_field(
         )
 
 @app.get("/depths", response_model=List[int])
-def get_depths():
+def get_depths(variable: Optional[str] = None):
     """
-    HTTP Contract: GET /depths
-    Returns sorted list of integer depth levels found in data/slices/
+    HTTP Contract: GET /depths?variable=
+    Returns display depth levels for ocean dataset (e.g. [0, 50, 100, 200, 500, 1000, 2000, 3000, 3992])
     """
+    manifest_path = os.path.join(GPU_DIR, "manifest.json")
+    if os.path.exists(manifest_path):
+        return [0, 50, 100, 200, 500, 1000, 2000, 3000, 3992]
+    
     if not os.path.exists(SLICES_DIR):
-        return [0, 50, 100, 200, 500]
+        return [0, 50, 100, 200, 500, 1000, 2000, 3000, 3992]
     
     depth_set = set()
-    for var in os.listdir(SLICES_DIR):
-        var_path = os.path.join(SLICES_DIR, var)
-        if os.path.isdir(var_path):
-            for d in os.listdir(var_path):
-                if d.isdigit():
-                    depth_set.add(int(d))
-    return sorted(list(depth_set)) if depth_set else [0, 50, 100, 200, 500]
+    if variable and os.path.exists(os.path.join(SLICES_DIR, variable)):
+        var_path = os.path.join(SLICES_DIR, variable)
+        for d in os.listdir(var_path):
+            if d.isdigit():
+                depth_set.add(int(d))
+    else:
+        for var in os.listdir(SLICES_DIR):
+            var_path = os.path.join(SLICES_DIR, var)
+            if os.path.isdir(var_path):
+                for d in os.listdir(var_path):
+                    if d.isdigit():
+                        depth_set.add(int(d))
+
+    return sorted(list(depth_set)) if depth_set else [0, 50, 100, 200, 500, 1000, 2000, 3000, 3992]
+
 
 @app.get("/floats")
 def get_floats(region: Optional[str] = None):
@@ -178,6 +198,29 @@ def get_float_profile(float_id: str):
             status_code=500,
             detail=f"Error reading float profile for {float_id}: {str(e)}"
         )
+
+@app.get("/gpu/manifest")
+def get_gpu_manifest():
+    """
+    HTTP Contract: GET /gpu/manifest
+    Returns dataset metadata (dimensions, coordinates, depth levels, variables).
+    """
+    manifest_path = os.path.join(GPU_DIR, "manifest.json")
+    if not os.path.exists(manifest_path):
+        raise HTTPException(status_code=404, detail="GPU manifest file not found.")
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+@app.get("/gpu/{filename}")
+def get_gpu_binary_file(filename: str):
+    """
+    HTTP Contract: GET /gpu/{filename}
+    Streams binary Float32 array buffers (uo.bin, vo.bin, mask.bin, thetao.bin, so.bin).
+    """
+    file_path = os.path.join(GPU_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"GPU binary buffer {filename} not found.")
+    return FileResponse(file_path, media_type="application/octet-stream", filename=filename)
 
 
 if __name__ == "__main__":

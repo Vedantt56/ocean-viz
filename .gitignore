@@ -1,8 +1,10 @@
-# Large raw data files (downloaded NetCDF/Argo files)
-pipeline/raw/
+# Large raw NetCDF download files
+pipeline/raw/*.nc
 
-# Generated dataset slices & float profiles (local execution output)
-data/
+# Allow GPU binary data & Float indices for team handoff
+!data/gpu/
+!data/floats/
+!data/slices/
 
 # Python cache & virtual environments
 __pycache__/
