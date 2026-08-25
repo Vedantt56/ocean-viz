@@ -183,3 +183,80 @@ export async function getGpuBuffer(filename) {
     throw err;
   }
 }
+
+/**
+ * Fetch daily ocean report and Gemini narrative
+ * Endpoint: GET /report?time=
+ */
+export async function getDailyReport(time) {
+  if (USE_FIXTURES) {
+    return mockDelay({
+      time: time || "2026-08-20",
+      narrative_available: false,
+      narrative_text: null,
+      stats: {
+        time: time || "2026-08-20",
+        domain: "Bay of Bengal",
+        variables: {},
+        floats: { total_active: 0, float_ids: [] },
+        highlights: ["Daily report statistics summary."]
+      }
+    });
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/report?time=${encodeURIComponent(time)}`);
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({ detail: `HTTP ${res.status}: ${res.statusText}` }));
+      throw new Error(errJson.detail || `HTTP ${res.status}: ${res.statusText}`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn(`[API] Backend /report unreachable or error for time ${time}:`, err.message);
+    throw err;
+  }
+}
+
+/**
+ * Ask a question about a specific daily report
+ * Endpoint: POST /report/chat
+ */
+export async function getReportChat(time, question, selectedDepth = null, selectedVariable = null) {
+  if (USE_FIXTURES) {
+    return mockDelay({
+      time: time || "2026-08-20",
+      answer_available: true,
+      answer: `Based on the report for ${time || '2026-08-20'}, the observed hydrodynamic velocity peak reaches 1.4 m/s in the surface layer, steadily decreasing to 0.09 m/s at 3992m.`,
+      model: "mock-fixture"
+    });
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/report/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        time,
+        question,
+        selected_depth: selectedDepth,
+        selected_variable: selectedVariable
+      })
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({ detail: `HTTP ${res.status}: ${res.statusText}` }));
+      throw new Error(errJson.detail || `HTTP ${res.status}: ${res.statusText}`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn(`[API] Backend /report/chat unreachable or error for time ${time}:`, err.message);
+    return {
+      time,
+      answer_available: false,
+      answer: null,
+      error: "The report assistant is temporarily unavailable.",
+      model: null
+    };
+  }
+}
+
+

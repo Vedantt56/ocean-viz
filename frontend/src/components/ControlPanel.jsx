@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 import ColorbarEditor from './ColorbarEditor.jsx';
 
-import { X, Info, Sliders, Layers, Eye, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Info, Sliders, Layers, Eye, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
 
 const VARIABLES = [
   { id: 'temperature', name: 'Temperature', unit: '°C', color: 'from-amber-500 to-rose-500' },
@@ -17,8 +17,10 @@ export default function ControlPanel({
   activeDepth,
   onSelectDepth,
   availableDepths = [],
+  onOpenReportPanel,
   palette,
   onSelectPalette,
+
   scaleMode,
   onToggleScaleMode,
   minOverride,
@@ -79,7 +81,7 @@ export default function ControlPanel({
   }
 
   return (
-    <aside className="w-80 glass-panel border-r border-ocean-border p-4.5 flex flex-col gap-4 z-20 shadow-glass overflow-y-auto font-sans relative">
+    <aside className="w-80 glass-panel border-r border-ocean-border p-4 flex flex-col gap-4 z-20 shadow-glass overflow-y-auto font-sans relative">
       <button
         onClick={() => handleToggleCollapse(true)}
         className="absolute top-3 right-3 w-6 h-6 flex items-center justify-center rounded-md border border-ocean-border/60 text-slate-400 hover:text-cyan-300 hover:border-cyan-400/60 transition-colors"
@@ -181,7 +183,19 @@ export default function ControlPanel({
         </div>
       </div>
 
+      {/* Section 2.5: REPORT GENERATOR */}
+      <div className="pb-3 border-b border-ocean-border/40">
+        <button
+          onClick={onOpenReportPanel}
+          className="w-full py-2.5 px-3.5 bg-gradient-to-r from-sky-600/30 to-cyan-600/30 hover:from-sky-600/50 hover:to-cyan-600/50 border border-cyan-500/50 hover:border-cyan-400 text-white rounded-xl font-mono text-xs font-semibold flex items-center justify-center gap-2 transition-all duration-200 shadow-md shadow-cyan-950/40 group"
+        >
+          <FileText className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
+          <span>Report Generator</span>
+        </button>
+      </div>
+
       {/* Section 3: COLORBAR EDITOR */}
+
       <div>
         <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 font-mono flex items-center justify-between">
           <span>COLORBAR & RANGE</span>
@@ -258,8 +272,9 @@ export default function ControlPanel({
         <div className="mt-auto p-3 rounded-xl bg-ocean-deep/80 border border-ocean-border/70 text-[10px] text-slate-400 leading-relaxed flex items-start gap-2 relative shadow-inner">
           <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
           <div className="pr-4 font-sans">
-            <span className="text-amber-400 font-semibold">Note:</span> Real-time Argo float profile overlays connected via INCOIS/GDAC API feeds.
+            <span className="text-cyan-400 font-semibold">Live Data Feed:</span> Real Argo GDAC (Global Data Assembly Centre) float profiles active in Bay of Bengal domain.
           </div>
+
           <button
             onClick={() => setShowNotice(false)}
             className="absolute top-2 right-2 text-slate-500 hover:text-slate-300 transition-colors"

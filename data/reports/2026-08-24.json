@@ -1,0 +1,235 @@
+{
+  "time": "2026-08-24",
+  "narrative_available": true,
+  "narrative_text": "### 1. Overall Day Summary\n* **Domain:** Bay of Bengal (6.66\u00b0N \u2013 21.00\u00b0N, 78.66\u00b0E \u2013 92.25\u00b0E)\n* **Date:** 2026-08-24 (Generated: 2026-08-25T01:18:32Z)\n* **Temperature Range:** 2.38\u00b0C to 33.68\u00b0C (Mean: 17.1118\u00b0C)\n* **Hydrodynamic Velocity:** Peak of 1.399 m/s (Mean: 0.5605 m/s)\n* **Active Argo Floats:** 1 profiler active in domain\n\n---\n\n### 2. Depth-by-Depth Findings\n\n* **0 m (Surface):**\n  * **Temperature:** 25.67\u00b0C to 33.68\u00b0C (Mean: 29.933\u00b0C, Std: 1.7459)\n  * **Salinity:** 33.8 to 34.2 (Mean: 33.9956, Std: 0.1416)\n  * **Currents:** 0.9 m/s to 1.399 m/s (Mean: 1.1331 m/s, Std: 0.1708)\n  * **Chlorophyll:** 1.921 to 2.52 (Mean: 2.22, Std: 0.1507)\n\n* **92 m:**\n  * **Temperature:** 24.26\u00b0C to 31.9\u00b0C (Mean: 28.315\u00b0C, Std: 1.6563)\n  * **Salinity:** 33.86 to 34.26 (Mean: 34.0606, Std: 0.1411)\n  * **Currents:** 0.803 m/s to 1.302 m/s (Mean: 1.0364 m/s, Std: 0.1709)\n  * **Chlorophyll:** 1.412 to 2.011 (Mean: 1.7114, Std: 0.1507)\n\n* **380 m:**\n  * **Temperature:** 20.33\u00b0C to 26.94\u00b0C (Mean: 23.8122\u00b0C, Std: 1.4088)\n  * **Salinity:** 34.05 to 34.45 (Mean: 34.2429, Std: 0.141)\n  * **Currents:** 0.552 m/s to 1.051 m/s (Mean: 0.7853 m/s, Std: 0.1709)\n  * **Chlorophyll:** 0.464 to 1.063 (Mean: 0.7629, Std: 0.1507)\n\n* **902 m:**\n  * **Temperature:** 14.79\u00b0C to 19.95\u00b0C (Mean: 17.4564\u00b0C, Std: 1.0666)\n  * **Salinity:** 34.31 to 34.71 (Mean: 34.5078, Std: 0.1421)\n  * **Currents:** 0.246 m/s to 0.745 m/s (Mean: 0.4794 m/s, Std: 0.1709)\n  * **Chlorophyll:** Min, Max, Mean: 0.187 (Std: 0.0)\n\n* **1684 m:**\n  * **Temperature:** 9.24\u00b0C to 12.96\u00b0C (Mean: 11.0864\u00b0C, Std: 0.743)\n  * **Salinity:** 34.59 to 34.99 (Mean: 34.7853, Std: 0.1415)\n  * **Currents:** 0.02 m/s to 0.503 m/s (Mean: 0.2386 m/s, Std: 0.1691)\n  * **Chlorophyll:** Min, Max, Mean: 0.038 (Std: 0.0)\n\n* **2865 m:**\n  * **Temperature:** 4.63\u00b0C to 7.17\u00b0C (Mean: 5.8111\u00b0C, Std: 0.5165)\n  * **Salinity:** 34.84 to 35.24 (Mean: 35.0312, Std: 0.141)\n  * **Currents:** 0.02 m/s to 0.362 m/s (Mean: 0.1375 m/s, Std: 0.1264)\n  * **Chlorophyll:** Min, Max, Mean: 0.021 (Std: 0.0)\n\n* **3992 m:**\n  * **Temperature:** 2.38\u00b0C to 4.49\u00b0C (Mean: 3.3688\u00b0C, Std: 0.4428)\n  * **Salinity:** 34.96 to 35.36 (Mean: 35.1543, Std: 0.141)\n  * **Currents:** 0.02 m/s to 0.319 m/s (Mean: 0.1134 m/s, Std: 0.1101)\n  * **Chlorophyll:** Min, Max, Mean: 0.02 (Std: 0.0)\n\n---\n\n### 3. Findings for Each Available Variable\n\n* **Temperature:**\n  * Overall Range: 2.38\u00b0C to 33.68\u00b0C\n  * Mean: 17.1118\u00b0C\n  * Standard Deviation: 9.9837\n  * Sample Count: 4,375\n\n* **Salinity:**\n  * Overall Range: 33.8 to 35.36\n  * Mean: 34.5397\n  * Standard Deviation: 0.4526\n  * Sample Count: 4,375\n\n* **Currents:**\n  * Overall Range: 0.02 m/s to 1.399 m/s\n  * Mean: 0.5605 m/s\n  * Standard Deviation: 0.4255\n  * Sample Count: 4,375\n\n* **Chlorophyll:**\n  * Overall Range: 0.02 to 2.52\n  * Mean: 0.7086\n  * Standard Deviation: 0.8477\n  * Sample Count: 4,375\n\n---\n\n### 4. Float Observations\n\n* **Total Active Floats:** 1\n* **Active Float ID:** ARGO_2902766\n* **Reported Temperature Range:** 2.76\u00b0C to 29.04\u00b0C\n* **Reported Salinity Range:** 30.19 to 35.04\n\n---\n\n### 5. Data Availability & Observations\n\n* **Data Completeness:** All four reported variables (Temperature, Salinity, Currents, Chlorophyll) contain a sample count of 4,375.\n* **Chlorophyll Variability:** Chlorophyll values remain uniform across depth levels from 902 m down to 3992 m, recording standard deviations of 0.0 at each of those levels.\n* **Missing Variables:** No required or reported variables are unavailable in the provided dataset.",
+  "stats": {
+    "time": "2026-08-24",
+    "domain": "Bay of Bengal (6.66\u00b0N - 21.00\u00b0N, 78.66\u00b0E - 92.25\u00b0E)",
+    "generated_at": "2026-08-25T01:18:32.517501+00:00",
+    "variables": {
+      "temperature": {
+        "min": 2.38,
+        "max": 33.68,
+        "mean": 17.1118,
+        "std": 9.9837,
+        "sample_count": 4375,
+        "depth_levels": {
+          "0": {
+            "min": 25.67,
+            "max": 33.68,
+            "mean": 29.933,
+            "std": 1.7459
+          },
+          "92": {
+            "min": 24.26,
+            "max": 31.9,
+            "mean": 28.315,
+            "std": 1.6563
+          },
+          "380": {
+            "min": 20.33,
+            "max": 26.94,
+            "mean": 23.8122,
+            "std": 1.4088
+          },
+          "902": {
+            "min": 14.79,
+            "max": 19.95,
+            "mean": 17.4564,
+            "std": 1.0666
+          },
+          "1684": {
+            "min": 9.24,
+            "max": 12.96,
+            "mean": 11.0864,
+            "std": 0.743
+          },
+          "2865": {
+            "min": 4.63,
+            "max": 7.17,
+            "mean": 5.8111,
+            "std": 0.5165
+          },
+          "3992": {
+            "min": 2.38,
+            "max": 4.49,
+            "mean": 3.3688,
+            "std": 0.4428
+          }
+        }
+      },
+      "salinity": {
+        "min": 33.8,
+        "max": 35.36,
+        "mean": 34.5397,
+        "std": 0.4526,
+        "sample_count": 4375,
+        "depth_levels": {
+          "0": {
+            "min": 33.8,
+            "max": 34.2,
+            "mean": 33.9956,
+            "std": 0.1416
+          },
+          "92": {
+            "min": 33.86,
+            "max": 34.26,
+            "mean": 34.0606,
+            "std": 0.1411
+          },
+          "380": {
+            "min": 34.05,
+            "max": 34.45,
+            "mean": 34.2429,
+            "std": 0.141
+          },
+          "902": {
+            "min": 34.31,
+            "max": 34.71,
+            "mean": 34.5078,
+            "std": 0.1421
+          },
+          "1684": {
+            "min": 34.59,
+            "max": 34.99,
+            "mean": 34.7853,
+            "std": 0.1415
+          },
+          "2865": {
+            "min": 34.84,
+            "max": 35.24,
+            "mean": 35.0312,
+            "std": 0.141
+          },
+          "3992": {
+            "min": 34.96,
+            "max": 35.36,
+            "mean": 35.1543,
+            "std": 0.141
+          }
+        }
+      },
+      "currents": {
+        "min": 0.02,
+        "max": 1.399,
+        "mean": 0.5605,
+        "std": 0.4255,
+        "sample_count": 4375,
+        "depth_levels": {
+          "0": {
+            "min": 0.9,
+            "max": 1.399,
+            "mean": 1.1331,
+            "std": 0.1708
+          },
+          "92": {
+            "min": 0.803,
+            "max": 1.302,
+            "mean": 1.0364,
+            "std": 0.1709
+          },
+          "380": {
+            "min": 0.552,
+            "max": 1.051,
+            "mean": 0.7853,
+            "std": 0.1709
+          },
+          "902": {
+            "min": 0.246,
+            "max": 0.745,
+            "mean": 0.4794,
+            "std": 0.1709
+          },
+          "1684": {
+            "min": 0.02,
+            "max": 0.503,
+            "mean": 0.2386,
+            "std": 0.1691
+          },
+          "2865": {
+            "min": 0.02,
+            "max": 0.362,
+            "mean": 0.1375,
+            "std": 0.1264
+          },
+          "3992": {
+            "min": 0.02,
+            "max": 0.319,
+            "mean": 0.1134,
+            "std": 0.1101
+          }
+        }
+      },
+      "chlorophyll": {
+        "min": 0.02,
+        "max": 2.52,
+        "mean": 0.7086,
+        "std": 0.8477,
+        "sample_count": 4375,
+        "depth_levels": {
+          "0": {
+            "min": 1.921,
+            "max": 2.52,
+            "mean": 2.22,
+            "std": 0.1507
+          },
+          "92": {
+            "min": 1.412,
+            "max": 2.011,
+            "mean": 1.7114,
+            "std": 0.1507
+          },
+          "380": {
+            "min": 0.464,
+            "max": 1.063,
+            "mean": 0.7629,
+            "std": 0.1507
+          },
+          "902": {
+            "min": 0.187,
+            "max": 0.187,
+            "mean": 0.187,
+            "std": 0.0
+          },
+          "1684": {
+            "min": 0.038,
+            "max": 0.038,
+            "mean": 0.038,
+            "std": 0.0
+          },
+          "2865": {
+            "min": 0.021,
+            "max": 0.021,
+            "mean": 0.021,
+            "std": 0.0
+          },
+          "3992": {
+            "min": 0.02,
+            "max": 0.02,
+            "mean": 0.02,
+            "std": 0.0
+          }
+        }
+      }
+    },
+    "floats": {
+      "total_active": 1,
+      "float_ids": [
+        "ARGO_2902766"
+      ],
+      "temp_range": {
+        "min": 2.76,
+        "max": 29.04
+      },
+      "salinity_range": {
+        "min": 30.19,
+        "max": 35.04
+      }
+    },
+    "highlights": [
+      "Sea Surface & Water Column Temp Range: 2.38\u00b0C to 33.68\u00b0C (Mean: 17.1118\u00b0C).",
+      "Hydrodynamic Velocity Peak: 1.399 m/s with average flow of 0.5605 m/s.",
+      "Real Argo GDAC Floats Reporting: 1 active profilers in domain on 2026-08-24."
+    ]
+  }
+}

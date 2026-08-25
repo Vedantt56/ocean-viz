@@ -1,7 +1,9 @@
 import os
 import json
 from typing import Optional, List, Dict, Any
+from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException, Query
+
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 
@@ -39,9 +41,11 @@ def root():
             {"path": "/timesteps", "description": "List available timesteps"},
             {"path": "/field", "params": ["variable", "depth", "time"], "description": "Fetch 2D slice data grid"},
             {"path": "/floats", "params": ["region (optional)"], "description": "List all active float positions"},
-            {"path": "/floats/{float_id}/profile", "description": "Fetch depth profile for specific float"}
+            {"path": "/floats/{float_id}/profile", "description": "Fetch depth profile for specific float"},
+            {"path": "/report", "params": ["time", "force (optional)"], "description": "Fetch structured daily report and Gemini narrative"}
         ]
     }
+
 
 @app.get("/variables", response_model=List[str])
 def get_variables():
@@ -187,7 +191,8 @@ def get_depths(variable: Optional[str] = None):
         if depth_set:
             return sorted(list(depth_set))
 
-    return [0, 1000, 2000, 3000, 4000, 5000, 5500]
+    return [0, 92, 380, 902, 1684, 2865, 3992]
+
 
 
 
@@ -270,6 +275,78 @@ def get_gpu_binary_file(filename: str):
     return FileResponse(file_path, media_type="application/octet-stream", filename=filename)
 
 
+try:
+    from backend.report_generator import get_or_generate_report
+except ImportError:
+    from report_generator import get_or_generate_report
+
+@app.get("/report")
+def get_daily_report(
+    time: str = Query(..., description="Target date timestep string, e.g. 2026-08-20"),
+    force: bool = Query(False, description="Force re-generation of narrative report")
+):
+    """
+    HTTP Contract: GET /report?time=2026-08-20[&force=true]
+    Generates or retrieves cached daily oceanographic report and Gemini narrative.
+    """
+    valid_timesteps = get_timesteps()
+    if time not in valid_timesteps:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid timestep '{time}'. Available timesteps: {valid_timesteps}"
+        )
+
+    try:
+        report = get_or_generate_report(time, force=force)
+        return report
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate report for {time}: {str(e)}"
+        )
+
+
+class ReportChatRequest(BaseModel):
+    time: str
+    question: str
+    selected_depth: Optional[int] = None
+    selected_variable: Optional[str] = None
+
+try:
+    from backend.report_chat import answer_report_question
+except ImportError:
+    from report_chat import answer_report_question
+
+@app.post("/report/chat")
+def chat_report(req: ReportChatRequest):
+    """
+    HTTP Contract: POST /report/chat
+    Answers questions about a specific daily report using Groq AI.
+    """
+    valid_timesteps = get_timesteps()
+    if req.time not in valid_timesteps:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid timestep '{req.time}'. Available timesteps: {valid_timesteps}"
+        )
+
+    if not req.question or not req.question.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Question cannot be empty."
+        )
+
+    return answer_report_question(
+        time=req.time,
+        question=req.question.strip(),
+        selected_depth=req.selected_depth,
+        selected_variable=req.selected_variable
+    )
+
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+

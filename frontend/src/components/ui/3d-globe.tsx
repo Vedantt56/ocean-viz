@@ -351,9 +351,6 @@ function Scene({ markers, config, onMarkerClick, onMarkerHover }: SceneProps) {
 
   return (
     <>
-      {/* Space Starfield Background */}
-      <Stars radius={100} depth={60} count={3500} factor={4} saturation={0} fade speed={1.2} />
-
       <ambientLight intensity={config.ambientIntensity} />
 
       <directionalLight
@@ -376,6 +373,7 @@ function Scene({ markers, config, onMarkerClick, onMarkerHover }: SceneProps) {
 
       <OrbitControls
         makeDefault
+        target={[0, 0, 0]}
         enablePan={config.enablePan}
         enableZoom={config.enableZoom}
         minDistance={config.minDistance}

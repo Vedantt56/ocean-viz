@@ -9,7 +9,10 @@ import Legend from './components/Legend.jsx';
 
 import ProfilePanel from './components/ProfilePanel.jsx';
 
+import DailyReportPanel from './components/DailyReportPanel.jsx';
+
 import TimeControl from './components/TimeControl.jsx';
+
 
 import GlobeView from './components/GlobeView.jsx';
 
@@ -37,11 +40,13 @@ export default function App() {
   const [slicesData, setSlicesData] = useState([]);
   const [floatsData, setFloatsData] = useState([]);
   const [selectedFloatProfile, setSelectedFloatProfile] = useState(null);
+  const [reportPanelOpen, setReportPanelOpen] = useState(false);
   const [valueRange, setValueRange] = useState({ min: 0, max: 30 });
   const [loading, setLoading] = useState(true);
 
   // View mode state: "slices" | "volume" | "isosurface"
   const [renderMode, setRenderMode] = useState("slices");
+
 
   const VARIABLE_RANGES = {
     currents: { min: 0.0, max: 0.85, palette: 'flow' },
@@ -172,8 +177,10 @@ export default function App() {
         activeDepth={activeDepth}
         onSelectDepth={setActiveDepth}
         availableDepths={availableDepths}
+        onOpenReportPanel={() => setReportPanelOpen(true)}
         palette={palette}
         onSelectPalette={setPalette}
+
         scaleMode={scaleMode}
         onToggleScaleMode={setScaleMode}
         minOverride={minOverride}
@@ -217,7 +224,9 @@ export default function App() {
           activeDepth={activeDepth}
           availableDepths={availableDepths}
           activeVariable={activeVariable}
+          activeTime={activeTime}
           floatsData={floatsData}
+
           onFloatSelect={handleFloatSelect}
           palette={palette}
           scaleMode={scaleMode}
@@ -276,7 +285,14 @@ export default function App() {
           />
         )}
 
+        {/* Daily Ocean Report Panel */}
+        <DailyReportPanel
+          activeTime={activeTime}
+          open={reportPanelOpen}
+          onClose={() => setReportPanelOpen(false)}
+        />
       </main>
     </div>
   );
+
 }

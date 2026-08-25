@@ -1150,7 +1150,7 @@ function createFloatTagTexture(float_id) {
 
 function rebuildFloatsMesh(floatsGroup, props) {
   clearGroup(floatsGroup);
-  const { floatsData, slicesData, availableDepths, verticalExaggeration } = props;
+  const { floatsData, slicesData, availableDepths, verticalExaggeration, activeTime } = props;
   if (!Array.isArray(floatsData)) return;
 
   const bounds = getDomainBounds(slicesData || []);
@@ -1160,6 +1160,16 @@ function rebuildFloatsMesh(floatsGroup, props) {
     const lat = Number(float.lat);
     const lon = Number(float.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+    // Show float pin ONLY if it reported data on the active date
+    if (activeTime) {
+      if (Array.isArray(float.dates) && float.dates.length > 0) {
+        if (!float.dates.includes(activeTime)) return;
+      } else if (float.time && float.time !== activeTime) {
+        return;
+      }
+    }
+
 
     const { x, z } = projectLonLat(lon, lat, bounds);
     const group = new THREE.Group();
@@ -1241,6 +1251,7 @@ export default function Scene({
   activeDepth = 0,
   availableDepths = [0, 50, 100, 200, 500],
   activeVariable = 'temperature',
+  activeTime = '',
   floatsData = [],
   onFloatSelect,
   palette = 'thermal',
@@ -1273,6 +1284,7 @@ export default function Scene({
     activeDepth,
     availableDepths,
     activeVariable,
+    activeTime,
     floatsData,
     palette,
     scaleMode,
@@ -1290,6 +1302,7 @@ export default function Scene({
       activeDepth,
       availableDepths,
       activeVariable,
+      activeTime,
       floatsData,
       palette,
       scaleMode,
@@ -1299,7 +1312,8 @@ export default function Scene({
       verticalExaggeration,
       sliceOpacity,
     };
-  }, [slicesData, activeDepth, availableDepths, activeVariable, floatsData, palette, scaleMode, minOverride, maxOverride, renderMode, verticalExaggeration, sliceOpacity]);
+  }, [slicesData, activeDepth, availableDepths, activeVariable, activeTime, floatsData, palette, scaleMode, minOverride, maxOverride, renderMode, verticalExaggeration, sliceOpacity]);
+
 
   useEffect(() => {
     const container = mountRef.current;
@@ -1555,7 +1569,8 @@ export default function Scene({
 
   useEffect(() => {
     if (floatsGroupRef.current) rebuildFloatsMesh(floatsGroupRef.current, propsRef.current);
-  }, [floatsData]);
+  }, [floatsData, activeTime]);
+
 
   return (
     <div className="relative w-full h-full select-none">
