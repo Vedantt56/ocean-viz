@@ -329,11 +329,13 @@ export default function DailyReportPanel({ activeTime, open, onClose }) {
                       <span>Water Column Temp Range</span>
                     </div>
                     <span className="text-[9px] font-mono text-amber-400 bg-amber-950/80 border border-amber-800/60 px-1.5 py-0.5 rounded">
-                      2.29°C to 34.01°C
+                      {variablesStats.temperature ? `${variablesStats.temperature.min}°C to ${variablesStats.temperature.max}°C` : 'Data Telemetry Active'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-200 font-sans leading-snug">
-                    Water Column Temp Range: 2.29°C to 34.01°C (Mean: 17.1106°C).
+                    {variablesStats.temperature
+                      ? `Water Column Temp Range: ${variablesStats.temperature.min}°C to ${variablesStats.temperature.max}°C (Mean: ${variablesStats.temperature.mean}°C).`
+                      : 'Temperature telemetry active.'}
                   </p>
                   <div className="pt-1">
                     <MiniTrendGraph color="#ff6b00" type="curve" />
@@ -348,11 +350,13 @@ export default function DailyReportPanel({ activeTime, open, onClose }) {
                       <span>Hydrodynamic Velocity Peak</span>
                     </div>
                     <span className="text-[9px] font-mono text-sky-400 bg-sky-950/80 border border-sky-800/60 px-1.5 py-0.5 rounded">
-                      Peak 1.4 m/s
+                      {variablesStats.currents ? `Peak ${variablesStats.currents.max} m/s` : 'Flow Active'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-200 font-sans leading-snug">
-                    Hydrodynamic Velocity Peak: 1.4 m/s (Average Flow: 0.5168 m/s).
+                    {variablesStats.currents
+                      ? `Hydrodynamic Velocity Peak: ${variablesStats.currents.max} m/s (Average Flow: ${variablesStats.currents.mean} m/s).`
+                      : 'Hydrodynamic velocity data active.'}
                   </p>
                   <div className="pt-1">
                     <MiniTrendGraph color="#38bdf8" type="flow" />
@@ -367,11 +371,11 @@ export default function DailyReportPanel({ activeTime, open, onClose }) {
                       <span>Real Argo GDAC Floats</span>
                     </div>
                     <span className="text-xs font-mono font-bold text-emerald-300 bg-emerald-950 border border-emerald-600/50 px-2 py-0.5 rounded-md shadow-sm">
-                      2 ACTIVE
+                      {stats.floats?.total_active ?? 0} ACTIVE
                     </span>
                   </div>
                   <p className="text-xs text-slate-200 font-sans leading-snug">
-                    Real Argo GDAC Floats: 2 active profilers reporting on {activeTime}.
+                    Real Argo GDAC Floats: {stats.floats?.total_active ?? 0} active profiler(s) reporting on {activeTime}.
                   </p>
                 </div>
               </div>
@@ -386,9 +390,9 @@ export default function DailyReportPanel({ activeTime, open, onClose }) {
               <div className="grid grid-cols-2 gap-2">
                 {Object.entries(VARIABLE_CONFIG).map(([varKey, cfg]) => {
                   const vStats = variablesStats[varKey] || {
-                    min: varKey === 'temperature' ? 2.29 : varKey === 'salinity' ? 33.80 : varKey === 'currents' ? 0.02 : 0.02,
-                    max: varKey === 'temperature' ? 34.01 : varKey === 'salinity' ? 35.36 : varKey === 'currents' ? 1.40 : 2.52,
-                    mean: varKey === 'temperature' ? 17.1106 : varKey === 'salinity' ? 34.5461 : varKey === 'currents' ? 0.5168 : 0.7086,
+                    min: 'N/A',
+                    max: 'N/A',
+                    mean: 'N/A',
                   };
                   const Icon = cfg.icon;
 
@@ -428,7 +432,7 @@ export default function DailyReportPanel({ activeTime, open, onClose }) {
               </div>
             </div>
 
-            {/* Depth Detail Section (Nested Detailed Panels for 0m and 92m) */}
+            {/* Depth Detail Section (Dynamic Detailed Panels for Available Depths) */}
             <div className="space-y-2">
               <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-400 flex items-center justify-between">
                 <span>DEPTH LEVEL DETAIL READINGS</span>
@@ -436,87 +440,57 @@ export default function DailyReportPanel({ activeTime, open, onClose }) {
               </div>
 
               <div className="space-y-2">
-                {/* 0m Surface Layer */}
-                <div className="bg-slate-900/80 border border-cyan-500/30 rounded-xl p-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-mono font-bold">
-                    <span className="text-cyan-300 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                      0 m — Surface Layer
-                    </span>
-                    <span className="text-[9px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">4,375 SAMPLES</span>
-                  </div>
+                {[0, 92].map((depthVal) => {
+                  const tempD = variablesStats.temperature?.depth_levels?.[depthVal];
+                  const salD = variablesStats.salinity?.depth_levels?.[depthVal];
+                  const curD = variablesStats.currents?.depth_levels?.[depthVal];
+                  const chlD = variablesStats.chlorophyll?.depth_levels?.[depthVal];
+                  const totalSamples = variablesStats.temperature?.sample_count ? Math.round(variablesStats.temperature.sample_count / (Object.keys(variablesStats.temperature.depth_levels || {}).length || 7)) : null;
 
-                  <div className="grid grid-cols-2 gap-2 text-[10px] font-mono pt-1">
-                    <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
-                      <div className="text-amber-400 font-bold">Temperature</div>
-                      <div className="text-slate-300">Range: 26.34 - 34.01 °C</div>
-                      <div className="text-slate-400">Mean: <span className="text-slate-200">29.9318°C</span></div>
-                      <div className="text-slate-400">Std Dev: <span className="text-amber-300">1.7421°C</span></div>
+                  return (
+                    <div key={depthVal} className="bg-slate-900/80 border border-cyan-500/30 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-mono font-bold">
+                        <span className="text-cyan-300 flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${depthVal === 0 ? 'bg-cyan-400' : 'bg-slate-400'}`} />
+                          {depthVal} m — {depthVal === 0 ? 'Surface Layer' : 'Sub-Surface Level'}
+                        </span>
+                        <span className="text-[9px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                          {totalSamples ? `${totalSamples.toLocaleString()} GRID CELLS` : 'DATASET LEVEL'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[10px] font-mono pt-1">
+                        <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
+                          <div className="text-amber-400 font-bold">Temperature</div>
+                          <div className="text-slate-300">Range: {tempD ? `${tempD.min} - ${tempD.max} °C` : 'Telemetry Active'}</div>
+                          <div className="text-slate-400">Mean: <span className="text-slate-200">{tempD ? `${tempD.mean}°C` : 'N/A'}</span></div>
+                          <div className="text-slate-400">Std Dev: <span className="text-amber-300">{tempD ? `${tempD.std}°C` : 'N/A'}</span></div>
+                        </div>
+
+                        <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
+                          <div className="text-cyan-400 font-bold">Salinity</div>
+                          <div className="text-slate-300">Range: {salD ? `${salD.min} - ${salD.max} PSU` : 'Telemetry Active'}</div>
+                          <div className="text-slate-400">Mean: <span className="text-slate-200">{salD ? `${salD.mean} PSU` : 'N/A'}</span></div>
+                          <div className="text-slate-400">Std Dev: <span className="text-cyan-300">{salD ? `${salD.std} PSU` : 'N/A'}</span></div>
+                        </div>
+
+                        <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
+                          <div className="text-sky-400 font-bold">Currents</div>
+                          <div className="text-slate-300">Range: {curD ? `${curD.min} - ${curD.max} m/s` : 'Telemetry Active'}</div>
+                          <div className="text-slate-400">Mean: <span className="text-slate-200">{curD ? `${curD.mean} m/s` : 'N/A'}</span></div>
+                          <div className="text-slate-400">Std Dev: <span className="text-sky-300">{curD ? `${curD.std} m/s` : 'N/A'}</span></div>
+                        </div>
+
+                        <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
+                          <div className="text-emerald-400 font-bold">Chlorophyll-A</div>
+                          <div className="text-slate-300">Range: {chlD ? `${chlD.min} - ${chlD.max} mg/m³` : 'Telemetry Active'}</div>
+                          <div className="text-slate-400">Mean: <span className="text-slate-200">{chlD ? `${chlD.mean} mg/m³` : 'N/A'}</span></div>
+                          <div className="text-slate-400">Std Dev: <span className="text-emerald-300">{chlD ? `${chlD.std} mg/m³` : 'N/A'}</span></div>
+                        </div>
+                      </div>
                     </div>
-
-                    <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
-                      <div className="text-cyan-400 font-bold">Salinity</div>
-                      <div className="text-slate-300">Range: 33.80 - 34.20 PSU</div>
-                      <div className="text-slate-400">Mean: <span className="text-slate-200">34.0021 PSU</span></div>
-                      <div className="text-slate-400">Std Dev: <span className="text-cyan-300">0.1420 PSU</span></div>
-                    </div>
-
-                    <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
-                      <div className="text-sky-400 font-bold">Currents</div>
-                      <div className="text-slate-300">Range: 0.90 - 1.40 m/s</div>
-                      <div className="text-slate-400">Mean: <span className="text-slate-200">1.0826 m/s</span></div>
-                      <div className="text-slate-400">Std Dev: <span className="text-sky-300">0.1726 m/s</span></div>
-                    </div>
-
-                    <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
-                      <div className="text-emerald-400 font-bold">Chlorophyll-A</div>
-                      <div className="text-slate-300">Range: 1.921 - 2.520 mg/m³</div>
-                      <div className="text-slate-400">Mean: <span className="text-slate-200">2.2200 mg/m³</span></div>
-                      <div className="text-slate-400">Std Dev: <span className="text-emerald-300">0.1507 mg/m³</span></div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 92m Sub-Surface Layer */}
-                <div className="bg-slate-900/80 border border-ocean-border/60 rounded-xl p-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-mono font-bold">
-                    <span className="text-slate-300 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-slate-400" />
-                      92 m — Sub-Surface Level
-                    </span>
-                    <span className="text-[9px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">4,375 SAMPLES</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-[10px] font-mono pt-1">
-                    <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
-                      <div className="text-amber-400 font-bold">Temperature</div>
-                      <div className="text-slate-300">Range: 24.88 - 32.18 °C</div>
-                      <div className="text-slate-400">Mean: <span className="text-slate-200">28.3139°C</span></div>
-                      <div className="text-slate-400">Std Dev: <span className="text-amber-300">1.6527°C</span></div>
-                    </div>
-
-                    <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
-                      <div className="text-cyan-400 font-bold">Salinity</div>
-                      <div className="text-slate-300">Range: 33.86 - 34.26 PSU</div>
-                      <div className="text-slate-400">Mean: <span className="text-slate-200">34.0670 PSU</span></div>
-                      <div className="text-slate-400">Std Dev: <span className="text-cyan-300">0.1415 PSU</span></div>
-                    </div>
-
-                    <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
-                      <div className="text-sky-400 font-bold">Currents</div>
-                      <div className="text-slate-300">Range: 0.803 - 1.303 m/s</div>
-                      <div className="text-slate-400">Mean: <span className="text-slate-200">0.9859 m/s</span></div>
-                      <div className="text-slate-400">Std Dev: <span className="text-sky-300">0.1726 m/s</span></div>
-                    </div>
-
-                    <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 space-y-0.5">
-                      <div className="text-emerald-400 font-bold">Chlorophyll-A</div>
-                      <div className="text-slate-300">Range: 1.412 - 2.011 mg/m³</div>
-                      <div className="text-slate-400">Mean: <span className="text-slate-200">1.7114 mg/m³</span></div>
-                      <div className="text-slate-400">Std Dev: <span className="text-emerald-300">0.1507 mg/m³</span></div>
-                    </div>
-                  </div>
-                </div>
+                  );
+                })}
               </div>
             </div>
 

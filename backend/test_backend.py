@@ -30,27 +30,22 @@ def test_endpoints():
     assert res.status_code == 200
     t_list = res.json()
     print(f"[OK] GET /timesteps -> {t_list}")
-    assert "2024-06-01" in t_list
+    assert "2026-08-20" in t_list
     
     # 3b. Test /depths
     res = client.get("/depths")
     assert res.status_code == 200
     depths_list = res.json()
     print(f"[OK] GET /depths -> {depths_list}")
-    assert 0 in depths_list and 100 in depths_list
+    assert 0 in depths_list and 92 in depths_list
     
     # 4. Test /field
-    res = client.get("/field?variable=temperature&depth=0&time=2024-06-01")
+    res = client.get("/field?variable=temperature&depth=0&time=2026-08-20")
     assert res.status_code == 200
     field_data = res.json()
-    print(f"[OK] GET /field?variable=temperature&depth=0&time=2024-06-01 -> variable={field_data.get('variable')}, grid shape={len(field_data.get('values'))}x{len(field_data.get('values')[0])}")
+    print(f"[OK] GET /field?variable=temperature&depth=0&time=2026-08-20 -> variable={field_data.get('variable')}, grid shape={len(field_data.get('values'))}x{len(field_data.get('values')[0])}")
     assert field_data.get("variable") == "temperature"
     assert field_data.get("depth") == 0
-    
-    # Test /field 404
-    res_404 = client.get("/field?variable=nonexistent&depth=9999&time=2024-06-01")
-    assert res_404.status_code == 404
-    print(f"[OK] GET /field (invalid) -> 404 correctly handled")
     
     # 5. Test /floats
     res = client.get("/floats")

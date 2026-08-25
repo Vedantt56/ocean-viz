@@ -45,7 +45,7 @@ const DOMAIN_REGIONS = [
     lon: 85.0,
     bounds: '6.59°N - 21.00°N | 78.65°E - 92.32°E',
     variables: ['Temperature', 'Salinity', 'Currents', 'Chlorophyll'],
-    depthLevels: '0m - 500m (Stacked)',
+    depthLevels: '0m - 3992m (Stacked)',
     description: 'High-resolution ocean hydrodynamic and biogeochemical model fields integrated with real-time Argo float observations.',
   }
 ];
@@ -583,7 +583,7 @@ export default function GlobeView({ onSelectRegion, floatsCount = 0 }) {
                     Hydrodynamic & Biogeochemical model field (0m–3992m).
                   </p>
                   <div className="text-[10px] font-mono text-cyan-300/90 mt-2">
-                    4 Argo Floats · 4 Variables
+                    Active Argo Floats · 4 Variables
                   </div>
                 </div>
                 <button
