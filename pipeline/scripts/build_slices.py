@@ -2,6 +2,8 @@
 Downsample & slice NetCDF data into JSON files (Prompt P2 implementation)
 Exports data matching the filesystem contract: data/slices/{variable}/{depth}/{time}.json
 """
+"""
+updated script code """
 import os
 import sys
 import json
